@@ -326,29 +326,58 @@ function sess(){try{var s=JSON.parse(localStorage.getItem(AUTH_KEY)||'null');if(
 function me(){var s=sess();return (s&&s.user)||{};}
 function toast(msg,type,dur){var t=document.createElement('div');t.className='toast '+(type||'');t.textContent=msg;document.body.appendChild(t);setTimeout(function(){t.remove();},dur||2600);}
 // ====== звʼязок із бекендом Apps Script ======
-// Сюди вставити адресу розгортання: Deploy → Manage deployments → Web app → URL, що закінчується на /exec
-var API_URL='ВСТАВ_СЮДИ_АДРЕСУ_EXEC';
+// Дві форми адреси одного й того самого розгортання:
+//  [0] публічна — працює для всіх, потрібен доступ «Будь-хто»
+//  [1] доменна  — працює лише для залогінених у florium.com
+// Програма пробує по черзі й запамʼятовує ту, що відповіла.
+var API_URLS=[
+  'https://script.google.com/macros/s/AKfycbzjXPt0d2Z3nwVuEA1VzTlUlm2g7Y7oDdlFNU5ny6qqVnrLEMs_zoKbwede-EA6b-Qb/exec',
+  'https://script.google.com/a/macros/florium.com/s/AKfycbzjXPt0d2Z3nwVuEA1VzTlUlm2g7Y7oDdlFNU5ny6qqVnrLEMs_zoKbwede-EA6b-Qb/exec'
+];
+var API_KEY_LS='palety_api_url';
+function apiUrls(){var k=null;try{k=localStorage.getItem(API_KEY_LS);}catch(e){}
+  if(k&&API_URLS.indexOf(k)>0)return[k].concat(API_URLS.filter(function(u){return u!==k;}));
+  return API_URLS.slice();}
+
+function apiPost(url,body){
+  return fetch(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+                    body:JSON.stringify(body),redirect:'follow'})
+    .then(function(r){return r.text();})
+    .then(function(t){var j;try{j=JSON.parse(t);}catch(e){throw new Error('not-json');}return j;});
+}
 
 function api(action,data){
   return new Promise(function(res){
-    if(!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(API_URL)){
-      res({ok:false,error:'У index.html не вказано API_URL'});return;}
-    var s=sess(), body={action:action,data:data||{},token:(action==='login'?'':(s?s.token:''))};
-    fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
-                   body:JSON.stringify(body),redirect:'follow'})
-      .then(function(r){return r.text();})
-      .then(function(t){
-        var r; try{r=JSON.parse(t);}catch(e){res({ok:false,error:'Сервер відповів не JSON — перевірте доступ «Будь-хто» у розгортанні'});return;}
-        if(r&&r.needLogin){localStorage.removeItem(AUTH_KEY);showLogin('Сесія завершилась — введіть PIN знову');res({ok:false});return;}
-        // черга запису зайнята (інший працівник саме пише) — повторюємо самі, до 3 разів
-        var busy=r&&!r.ok&&(r.busy||/виключн|exclusive|lock|замок/i.test(String(r.error||'')));
-        if(busy){data=data||{};data._try=(data._try||0)+1;
-          if(data._try<=3){toast('⏳ Інший запис ще триває — повторюю ('+data._try+' з 3)…','wa',3000);
-            setTimeout(function(){api(action,data).then(res);},3000*data._try);return;}
-          r.error='Сервер зайнятий іншими записами. Зачекай хвилину й спробуй ще раз.';}
-        res(r);
-      })
-      .catch(function(e){res({ok:false,error:'Нема звʼязку з сервером: '+String(e&&e.message||e)});});
+    var body={action:action,data:data||{},token:''};
+    if(action!=='login'){var s=sess();body.token=s?s.token:'';}
+    var urls=apiUrls(), i=0;
+
+    function done(r){
+      if(r&&r.needLogin){localStorage.removeItem(AUTH_KEY);showLogin('Сесія завершилась — введіть PIN знову');res({ok:false});return;}
+      // черга запису зайнята (інший працівник саме пише) — повторюємо самі, до 3 разів
+      var busy=r&&!r.ok&&(r.busy||/виключн|exclusive|lock|замок/i.test(String(r.error||'')));
+      if(busy){data=data||{};data._try=(data._try||0)+1;
+        if(data._try<=3){toast('⏳ Інший запис ще триває — повторюю ('+data._try+' з 3)…','wa',3000);
+          setTimeout(function(){api(action,data).then(res);},3000*data._try);return;}
+        r.error='Сервер зайнятий іншими записами. Зачекай хвилину й спробуй ще раз.';}
+      res(r);
+    }
+
+    function tryNext(lastErr){
+      if(i>=urls.length){
+        res({ok:false,error:lastErr==='not-json'
+          ? 'Сервер не віддає дані. У розгортанні Apps Script має бути «Хто має доступ: Будь-хто».'
+          : 'Нема звʼязку з сервером: '+String(lastErr||'')});
+        return;
+      }
+      var u=urls[i++];
+      apiPost(u,body).then(function(r){
+        try{localStorage.setItem(API_KEY_LS,u);}catch(e){}
+        done(r);
+      }).catch(function(e){tryNext(String(e&&e.message||e));});
+    }
+
+    tryNext();
   });
 }
 // ===== Вхід за PIN =====
