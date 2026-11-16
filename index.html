@@ -318,7 +318,7 @@ tr.au-ok td{background:#eef9f1}tr.au-wait td{color:#8a958e}tr.au-x td{background
 <script>
 // ===== Окрема програма: власний бекенд (цей самий Apps Script), власний вхід за PIN =====
 var AUTH_KEY='palety_session_v1';
-var APP_BUILD='16.11.2026 · без дублів (p1.15)';
+var APP_BUILD='16.11.2026 · стабільний вхід (p1.16)';
 var PER_LAYER=5;
 function G(id){return document.getElementById(id);}
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -356,7 +356,7 @@ function api(action,data){
     var urls=apiUrls(), i=0;
 
     function done(r){
-      if(r&&r.needLogin){localStorage.removeItem(AUTH_KEY);showLogin('Сесія завершилась — введіть PIN знову');res({ok:false});return;}
+      if(r&&r.needLogin){localStorage.removeItem(AUTH_KEY);try{closeModal();}catch(e){}showLogin('Сесія завершилась — введіть PIN знову. Останню дію не записано — повтори її після входу.');res({ok:false,error:'сесія завершилась — увійди знову й повтори дію'});return;}
       // черга запису зайнята (інший працівник саме пише) — повторюємо самі, до 3 разів
       var busy=r&&!r.ok&&(r.busy||/виключн|exclusive|lock|замок/i.test(String(r.error||'')));
       if(busy){data=data||{};data._try=(data._try||0)+1;
@@ -512,7 +512,7 @@ async function load(){
   pl.then(function(x){if(x&&x.ok){S.layout=layoutIndex(x.rows||[]);renderSoon();}});
   var r=await timed('запас',api('reserveLive',first?{first:1}:{}));
   S.loading=false;
-  if(!r||!r.ok){toast('Не вдалося завантажити запас: '+((r&&(r.error||r.msg))||'?'),'er',5000);render();return;}
+  if(!r||!r.ok){toast('Не вдалося завантажити запас: '+((r&&(r.error||r.msg))||'сервер не відповів — спробуй ще раз'),'er',5000);render();return;}
   applyLive(r,true);S.stale=0;
   if(r.at&&Date.now()-r.at>30000)setTimeout(function(){liveTick(false);},1500);   // отримали «розігрітий» запас — одразу тихо беремо найсвіжіший
   pc.then(function(c){S.cellsLoading=false;if(c&&c.ok){S.cells=c.cells||[];S.fixed=c.fixed||[];S.cellsErr=c.cells&&c.cells.length?'':(c.fileError||'');}else S.cellsErr=(c&&(c.error||c.msg))||'';renderSoon();});
@@ -726,7 +726,7 @@ function moveMany(pairs){
   if(!items.length)return Promise.resolve();
   toast('Записую '+items.length+' ящ. одним пакетом…','',3000);
   return api('palletBoxMany',{items:JSON.stringify(items)}).then(function(r){
-    if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'?'),'er',5000);return;}
+    if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'сервер не відповів — спробуй ще раз'),'er',5000);return;}
     if(r.inProgress){toast('⏳ Цей запис уже виконується — зачекай кілька секунд','wa',3500);liveSoon();return;}
     var to={},bad=0;items.forEach(function(it){to[it.boxId]=it.pallet;});
     (r.results||[]).forEach(function(x){if(x.ok){var b=S.boxes[x.boxId];if(b){b.location=to[x.boxId];b.state='in';b.prev='';}S.fresh[x.boxId]=1;S.flash[x.boxId]=Date.now();}else bad++;});
@@ -831,7 +831,7 @@ async function cellAssign(code,clear){
   var art=clear?'':String((G('caA')||{}).value||'').trim(),name=clear?'':String((G('caN')||{}).value||'').trim();
   if(!clear&&!art){toast('Вкажи артикул','wa');return;}
   var r=await api('cellAssign',{cell:code,art:art,name:name});
-  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'?'),'er');return;}
+  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'сервер не відповів — спробуй ще раз'),'er');return;}
   S.fixed=(S.fixed||[]).filter(function(x){return x[0]!==code;}).concat([r.rec]);
   closeModal();toast(clear?'Ячейку '+code+' відкріплено':'📌 '+code+' → '+art,'',2200);render();
 }
@@ -1052,7 +1052,7 @@ function askReturn(id,to){returnHere(id,to);}   // кількість не пи�
 async function returnHere(id,to){
   var b=S.boxes[id];if(!b||!to)return;var q=String(b.qty==null?'':b.qty);
   var r=await api('palletBox',{op:'add',pallet:to,boxId:id,from:b.prev||'',art:b.art,name:b.name,qty:q,g0:(b.g||''),st:'out',force:'return'});
-  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'?'),'er',4000);return;}
+  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'сервер не відповів — спробуй ще раз'),'er',4000);return;}
   b.state='in';b.location=to;b.prev='';S.flash[id]=Date.now();S.fresh[id]=1;closeModal();
   toast('↩ '+id+' повернувся в '+to+fasNote(r),r&&r.fas&&!/^ok|^те саме/.test(r.fas)?'wa':'',3500);
   if(S.mode==='scan'){S.scanLast=null;renderScan();}else render();liveSoon();
@@ -1125,13 +1125,13 @@ async function saveLayoutRows(){
   var sel=[].slice.call(document.querySelectorAll('.lbRow')).filter(function(c){return c.checked;}).map(function(c){return c.value;});
   if(!sel.length){toast('Познач хоча б один троль','wa');return;}
   var m=layoutMerge(sel),L=m.list;var r=await api('layoutSave',{items:JSON.stringify(L)});
-  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'?'),'er',4000);return;}
+  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'сервер не відповів — спробуй ще раз'),'er',4000);return;}
   S.layout=layoutIndex(L.map(function(it){return [it.phys,it.code,it.art,it.name,r.at||''];}));S._draft=null;S.viewFile=false;try{localStorage.removeItem('layMovesDone');}catch(e){}closeModal();
   toast('🗄 Перескладено: троль '+sel.join(', ')+(m.skipped?' · '+m.skipped+' сорт(и) вже стоять в інших тролях — їх не дублюємо':''),'',3500);render();if(layoutMoves().length)setTimeout(openLayoutMoves,400);
 }
 async function saveLayout(){
   var L=window._layDraft||[];var r=await api('layoutSave',{items:JSON.stringify(L)});
-  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'?'),'er',4000);return;}
+  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'сервер не відповів — спробуй ще раз'),'er',4000);return;}
   S.layout=layoutIndex(L.map(function(it){return [it.phys,it.code,it.art,it.name,r.at||''];}));S.viewFile=false;try{localStorage.removeItem('layMovesDone');}catch(e){}closeModal();toast('🗄 Розкладку збережено: '+L.length+' сортів','',2500);render();if(layoutMoves().length)setTimeout(openLayoutMoves,400);
 }
 // карта всього складу для скану в режимі розкладки
@@ -1246,7 +1246,7 @@ async function scanGo(val){
 async function scanReturnSame(){
   var L=S.scanLast;if(!L||!L.b||!L.w)return;if(S.boxes[L.b.boxId]){askReturn(L.b.boxId,L.w.to);return;}var b=L.b,to=L.w.to,l=boxLeft(b);
   var r=await api('palletBox',{op:'add',pallet:to,boxId:b.boxId,from:to,art:b.art,name:b.name,qty:l==null?b.qty:l,g0:(b.g||''),st:'out',force:'return'});
-  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'?'),'er',4000);return;}
+  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'сервер не відповів — спробуй ще раз'),'er',4000);return;}
   if(S.boxes[b.boxId]){S.boxes[b.boxId].state='in';S.boxes[b.boxId].location=to;}
   S.flash[b.boxId]=Date.now();toast('↩ '+b.boxId+' повернувся в '+to+fasNote(r),r&&r.fas&&!/^ok|^те саме/.test(r.fas)?'wa':'',3500);S.scanLast=null;renderScan();liveSoon();
 }
@@ -1256,7 +1256,7 @@ async function scanConfirm(){
   var b=L.b,from=b.state==='out'?(b.prev||''):(b.location||'');
   if(L.w&&L.w.stay&&from===to){toast('✓ Лишається на місці','',1500);S.scanLast=null;renderScan();return;}
   var l=boxLeft(b),r=await api('palletBox',{op:'add',pallet:to,boxId:b.boxId,from:from,art:b.art,name:b.name,qty:l==null?b.qty:l,g0:((S.boxes[b.boxId]||{}).g||''),st:((S.boxes[b.boxId]||{}).state||'')});
-  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'?'),'er',4000);return;}
+  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'сервер не відповів — спробуй ще раз'),'er',4000);return;}
   if(L.w&&L.w.pin&&canAssign()){await api('cellAssign',{cell:to,art:b.art,name:b.name});if(L.w.pin.oldCell&&L.w.pin.oldCell!==to)await api('cellAssign',{cell:L.w.pin.oldCell,art:'',name:''});var cm=await api('cellsMap',{});if(cm&&cm.ok){S.cells=cm.cells||[];S.fixed=cm.fixed||[];}}
   if(S.boxes[b.boxId]){S.boxes[b.boxId].location=to;S.boxes[b.boxId].state='in';}else{S.boxes[b.boxId]=Object.assign({},b,{state:'in',location:to});}
   S.flash[b.boxId]=Date.now();toast('✓ '+b.boxId+' → '+to+fasNote(r),r&&r.fas&&!/^ok|^те саме/.test(r.fas)?'wa':'',3500);S.scanLast=null;renderScan();if(S.mode!=='scan')render();liveSoon();
@@ -1714,7 +1714,7 @@ function layListCopy(){return effLayout().list.map(function(it){return {phys:it.
 function layBoxesAt(code){return code?(cellOcc()[slotKeyOf(code)]||[]):[];}
 async function laySave(list,msg){
   var r=await api('layoutSave',{items:JSON.stringify(list)});
-  if(!r||!r.ok){toast('Не вдалося зберегти: '+((r&&(r.error||r.msg))||'?'),'er',4500);return false;}
+  if(!r||!r.ok){toast('Не вдалося зберегти: '+((r&&(r.error||r.msg))||'сервер не відповів — спробуй ще раз'),'er',4500);return false;}
   S.layout=layoutIndex(list.map(function(it){return [it.phys,it.code,it.art,it.name,r.at||''];}));S._draft=null;
   closeModal();toast(msg,'',3000);render();return true;
 }
@@ -1870,7 +1870,7 @@ async function commitAdd(target){
   var b=ADD.found,art=b?b.art:String((G('adA')||{}).value||'').trim(),name=b?b.name:String((G('adN')||{}).value||'').trim(),qty=b?(boxLeft(b)==null?b.qty:boxLeft(b)):String((G('adQ')||{}).value||'').trim();
   if(!b&&!art){toast('Вкажи артикул','wa');return;}
   var r=await api('palletBox',{op:'add',pallet:ADD.p,boxId:ADD.id,from:ADD.from,art:art,name:name,qty:qty,g0:((S.boxes[ADD.id]||{}).g||''),st:((S.boxes[ADD.id]||{}).state||'')});
-  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'?'),'er',4000);return;}
+  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'сервер не відповів — спробуй ще раз'),'er',4000);return;}
   S.manual.push([r.at,ADD.p,ADD.id,art,name,String(qty),me().name||'',r.act,ADD.from]);
   if(r.slots){if(r.slots.to)S.slots[ADD.p]=r.slots.to;if(ADD.from&&r.slots.from)S.slots[ADD.from]=r.slots.from;}
   S.fresh[ADD.id]=1;try{navigator.vibrate&&navigator.vibrate(60);}catch(e){}
@@ -1881,7 +1881,7 @@ async function commitAdd(target){
 async function moveBox(id,toCell){
   var f=findBox(id)||findAny(id);if(!f)return;var to=toCell||prompt('Куди перемістити ящик '+id+'? (палета або ячейка)','');if(!to)return;to=to.trim();if(!to||to===f.P.p)return;
   var b=f.x.b,r=await api('palletBox',{op:'add',pallet:to,boxId:id,from:f.P.p,art:b.art,name:b.name,qty:boxLeft(b)==null?b.qty:boxLeft(b),g0:((S.boxes[id]||{}).g||''),st:((S.boxes[id]||{}).state||'')});
-  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'?'),'er');return;}
+  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'сервер не відповів — спробуй ще раз'),'er');return;}
   S.manual.push([r.at,to,id,b.art,b.name,'',me().name||'',r.act,f.P.p]);if(r.slots){if(r.slots.to)S.slots[to]=r.slots.to;if(r.slots.from)S.slots[f.P.p]=r.slots.from;}
   S.fresh[id]=1;if(S.boxes[id]){S.boxes[id].location=to;S.boxes[id].state='in';}closeModal();toast((slotOf(to)?'🗄 Покладено в троль '+to:'↔ Переміщено на палету '+to)+fasNote(r),r&&r.fas&&!/^ok|^те саме/.test(r.fas)?'wa':'',4000);render();liveSoon();
 }
@@ -1889,7 +1889,7 @@ function findAny(id){var x=placements()[id];return x?{P:{p:x.p},x:x}:null;}
 async function removeBox(id){
   var f=findBox(id)||findAny(id);if(!f)return;if(!confirm('Зняти ящик '+id+' з палети '+f.P.p+'? Його місце стане вільним.'))return;
   var b=f.x.b,r=await api('palletBox',{op:'remove',boxId:id,from:f.P.p,art:b.art,name:b.name,g0:((S.boxes[id]||{}).g||''),st:((S.boxes[id]||{}).state||'')});
-  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'?'),'er');return;}
+  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'сервер не відповів — спробуй ще раз'),'er');return;}
   S.manual.push([r.at,f.P.p,id,b.art,b.name,'',me().name||'','знято','']);if(r.slots&&r.slots.from)S.slots[f.P.p]=r.slots.from;
   if(S.boxes[id])delete S.boxes[id];closeModal();toast('✕ Знято з палети '+f.P.p);render();liveSoon();
 }
