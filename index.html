@@ -318,7 +318,7 @@ tr.au-ok td{background:#eef9f1}tr.au-wait td{color:#8a958e}tr.au-x td{background
 <script>
 // ===== Окрема програма: власний бекенд (цей самий Apps Script), власний вхід за PIN =====
 var AUTH_KEY='palety_session_v1';
-var APP_BUILD='16.11.2026 · розкладка по тролях';
+var APP_BUILD='16.11.2026 · без дублів (p1.15)';
 var PER_LAYER=5;
 function G(id){return document.getElementById(id);}
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -348,6 +348,9 @@ function apiPost(url,body){
 
 function api(action,data){
   return new Promise(function(res){
+    // кожен запис має свій номер: якщо запит повториться (друга адреса, повтор, подвійний клік) — сервер не запише вдруге
+    var WR={palletBox:1,palletBoxMany:1,palletSlotsSave:1,cellAssign:1,userSave:1,layoutSave:1};
+    if(WR[action]){data=data||{};if(!data.rid)data.rid=Date.now().toString(36)+Math.random().toString(36).slice(2,9);}
     var body={action:action,data:data||{},token:''};
     if(action!=='login'){var s=sess();body.token=s?s.token:'';}
     var urls=apiUrls(), i=0;
@@ -514,7 +517,7 @@ async function load(){
   if(r.at&&Date.now()-r.at>30000)setTimeout(function(){liveTick(false);},1500);   // отримали «розігрітий» запас — одразу тихо беремо найсвіжіший
   pc.then(function(c){S.cellsLoading=false;if(c&&c.ok){S.cells=c.cells||[];S.fixed=c.fixed||[];S.cellsErr=c.cells&&c.cells.length?'':(c.fileError||'');}else S.cellsErr=(c&&(c.error||c.msg))||'';renderSoon();});
   ps.then(function(p){if(p&&p.ok){S.slots=p.slots||{};if(p.perLayer)PER_LAYER=p.perLayer;renderSoon();}});
-  Promise.all([pc,ps,pl]).then(function(){S.loadStat['усе']=Date.now()-t0;_snapT=0;snapSoon();fasKick(3000);});
+  Promise.all([pc,ps,pl]).then(function(){S.loadStat['усе']=Date.now()-t0;_snapT=0;snapSoon();fasKick(500);});
   renderSoon();
 }
 function loadStatTxt(){var s=S.loadStat||{},k=Object.keys(s);return k.length?'Завантаження: '+k.map(function(n){return n+' '+(s[n]/1000).toFixed(1)+' с';}).join(' · '):'';}
@@ -724,6 +727,7 @@ function moveMany(pairs){
   toast('Записую '+items.length+' ящ. одним пакетом…','',3000);
   return api('palletBoxMany',{items:JSON.stringify(items)}).then(function(r){
     if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'?'),'er',5000);return;}
+    if(r.inProgress){toast('⏳ Цей запис уже виконується — зачекай кілька секунд','wa',3500);liveSoon();return;}
     var to={},bad=0;items.forEach(function(it){to[it.boxId]=it.pallet;});
     (r.results||[]).forEach(function(x){if(x.ok){var b=S.boxes[x.boxId];if(b){b.location=to[x.boxId];b.state='in';b.prev='';}S.fresh[x.boxId]=1;S.flash[x.boxId]=Date.now();}else bad++;});
     toast('✓ Записано '+(r.done||0)+' ящ.'+(bad?' · не вдалось: '+bad+' — повтори для них':''),bad?'wa':'',4000);closeModal();render();liveSoon();
