@@ -194,6 +194,19 @@ button{font-family:inherit}
 .scan-big{font-size:40px}
 .scan-meta{font-size:13px;color:var(--mu);margin-top:6px}
 .scan-ids{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.scan-top{background:var(--card)}
+.scan-modal .scan-top{position:sticky;top:-18px;z-index:6;margin:-18px -18px 0;padding:14px 18px 10px;border-bottom:1px solid var(--bo);box-shadow:0 6px 12px -10px rgba(0,0,0,.25)}
+.scan-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;padding-right:4px}
+.scan-head .sh-n{font-size:19px;font-weight:800;line-height:1.2;margin-right:4px}
+.scan-head .sh-c{background:#f3f5f3;border:1px solid var(--bo);border-radius:9px;padding:2px 9px;font-size:15px;white-space:nowrap}
+.scan-head .sh-c small{font-size:11px;color:var(--mu);font-weight:700}
+.scan-head .sh-c em{font-size:11px;color:#a06a00;font-style:normal}
+.scan-head .sh-w{font-size:13px;color:var(--mu);width:100%}
+.scan-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.scan-acts .btn{height:48px;font-size:15px;white-space:nowrap}
+.scan-acts .sa-main{flex:1 1 220px;height:56px;font-size:18px}
+.scan-acts .sa-x{width:48px;padding:0;font-size:18px;margin-left:auto}
+@media(max-width:640px){.scan-acts .sa-b{flex:1 1 calc(50% - 8px)}.scan-acts .sa-x{flex:0 0 48px}}
 .scan-ids span{display:flex;flex-direction:column;background:#f3f5f3;border:1px solid var(--bo);border-radius:10px;padding:6px 10px;min-width:100px}
 .scan-ids small{font-size:11px;color:var(--mu);font-weight:700}
 .scan-ids b{font-size:18px}
@@ -318,7 +331,7 @@ tr.au-ok td{background:#eef9f1}tr.au-wait td{color:#8a958e}tr.au-x td{background
 <script>
 // ===== Окрема програма: власний бекенд (цей самий Apps Script), власний вхід за PIN =====
 var AUTH_KEY='palety_session_v1';
-var APP_BUILD='16.11.2026 · стабільний вхід (p1.16)';
+var APP_BUILD='20.11.2026 · кнопки скану зверху (p1.18)';
 var PER_LAYER=5;
 function G(id){return document.getElementById(id);}
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -349,7 +362,7 @@ function apiPost(url,body){
 function api(action,data){
   return new Promise(function(res){
     // кожен запис має свій номер: якщо запит повториться (друга адреса, повтор, подвійний клік) — сервер не запише вдруге
-    var WR={palletBox:1,palletBoxMany:1,palletSlotsSave:1,cellAssign:1,userSave:1,layoutSave:1};
+    var WR={palletBox:1,palletBoxMany:1,boxPour:1,palletSlotsSave:1,cellAssign:1,userSave:1,layoutSave:1};
     if(WR[action]){data=data||{};if(!data.rid)data.rid=Date.now().toString(36)+Math.random().toString(36).slice(2,9);}
     var body={action:action,data:data||{},token:''};
     if(action!=='login'){var s=sess();body.token=s?s.token:'';}
@@ -1049,7 +1062,11 @@ function colorLegend(){
   return '<div class="cleg">'+it('border:2px solid #2f9e5b;border-left-width:5px','на місці')+it('background:#fff8ec;border:2px dashed #e08a00','сусідній сорт')+it('background:#fffaf0;border:2px dashed #d39a14','треба покласти')+it('background:#f2f7fe;border:2px dashed #3a7bd5','на фасовці')+it('border:2px solid #d64545','не той сорт')+it('background:#f3f4f3;border:2px dashed #cfd5d1','порожньо / закінчився')+'</div>';
 }
 function askReturn(id,to){returnHere(id,to);}   // кількість не питаємо — завжди як на наліпці
+var _rhBusy={};
 async function returnHere(id,to){
+  if(_rhBusy[id]&&Date.now()-_rhBusy[id]<15000)return;_rhBusy[id]=Date.now();try{await returnHere0(id,to);}finally{delete _rhBusy[id];}
+}
+async function returnHere0(id,to){
   var b=S.boxes[id];if(!b||!to)return;var q=String(b.qty==null?'':b.qty);
   var r=await api('palletBox',{op:'add',pallet:to,boxId:id,from:b.prev||'',art:b.art,name:b.name,qty:q,g0:(b.g||''),st:'out',force:'return'});
   if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'сервер не відповів — спробуй ще раз'),'er',4000);return;}
@@ -1250,7 +1267,12 @@ async function scanReturnSame(){
   if(S.boxes[b.boxId]){S.boxes[b.boxId].state='in';S.boxes[b.boxId].location=to;}
   S.flash[b.boxId]=Date.now();toast('↩ '+b.boxId+' повернувся в '+to+fasNote(r),r&&r.fas&&!/^ok|^те саме/.test(r.fas)?'wa':'',3500);S.scanLast=null;renderScan();liveSoon();
 }
+var _scBusy=0;
 async function scanConfirm(){
+  if(_scBusy&&Date.now()-_scBusy<15000)return;   // подвійне натискання — другий раз не відправляємо
+  _scBusy=Date.now();try{await scanConfirm0();}finally{_scBusy=0;}
+}
+async function scanConfirm0(){
   var L=S.scanLast;if(!L||!L.b)return;var to=L.w&&L.w.to;if(L.w&&L.w.needPallet){to=String((G('scanPal')||{}).value||'').trim();if(!to){toast('Вкажи палету','wa');return;}}
   if(L.b.state==='out'&&S.boxes[L.b.boxId]){askReturn(L.b.boxId,to);return;}
   var b=L.b,from=b.state==='out'?(b.prev||''):(b.location||'');
@@ -1271,6 +1293,46 @@ function trollTarget(b){
     return null;}
   var home=homeFor(b.art);if(!home)return null;var hf=homeFree(b.art,b.boxId),s0=slotOf(home);return {to:home,label:'Троль '+s0.row+' · секція '+secOf(s0)+' · поличка '+s0.shelf+' · місце '+s0.slot,code:home,busy:!!hf.busy};
 }
+// ===== 🫗 ЗСИПАННЯ: неповний ящик → у неповний ящик того ж сорту в тролі, якщо разом влізе =====
+function boxAmt(b){if(!b)return null;var r=String(b.leftRaw==null?'':b.leftRaw).trim();if(r==='')return b.qty||null;var n=parseFloat(r.replace(',','.'));return isNaN(n)?null:n;}
+function pourCand(b){
+  if(!b||noTroll(b)||fromCold(b))return null;
+  if(b.state==='in'&&slotOf(b.location))return null;                 // уже в тролі
+  var lb=boxAmt(b);if(!(b.qty>0)||lb==null||lb<=0||lb>=b.qty)return null;  // лише неповний ящик
+  var best=null;
+  Object.keys(S.boxes).forEach(function(id){var t=S.boxes[id];
+    if(id===b.boxId||t.state!=='in'||!slotOf(t.location)||nk2(t.art)!==nk2(b.art)||!(t.qty>0))return;
+    var lt=boxAmt(t);if(lt==null||lt<=0||lt>=t.qty||lt+lb>t.qty)return;   // у тролі неповний, і разом влізе
+    if(!best||lt+lb>best.lt+best.lb)best={t:t,lt:lt,lb:lb};});
+  return best;
+}
+function pourHtml(b){
+  var c=pourCand(b);if(!c||me().role==='viewer')return '';
+  var t=c.t,pb=Math.round(c.lb/b.qty*100),pt=Math.round(c.lt/t.qty*100),pa=Math.round((c.lt+c.lb)/t.qty*100),s=slotOf(t.location);
+  var lay=null;try{var LY=(S.cells&&S.cells.length)?effLayout():null;if(LY&&LY.has)lay=LY.byArt[nk2(t.art)];}catch(e){}
+  var where=lay?physLabel(lay):(s?'Троль '+s.row+' · секція '+secOf(s)+' · поличка '+s.shelf+' · місце '+s.slot:'');
+  var bar=function(p,col){return '<div style="height:10px;border-radius:5px;background:#e9e3f3;overflow:hidden;margin-top:3px"><div style="height:100%;width:'+Math.min(100,p)+'%;background:'+col+'"></div></div>';};
+  return '<div style="margin-top:12px;border:3px solid #7b4fc0;border-radius:16px;background:#f7f2fd;padding:14px">'
+    +'<div style="font-size:13px;font-weight:800;color:#5a3f8f">🫗 НЕ В ЗАПАС — ЗСИП У ЯЩИК У ТРОЛІ</div>'
+    +'<div style="font-size:26px;font-weight:800;margin:4px 0 2px" class="mo">'+esc(t.location)+'</div>'+(where?'<div style="font-size:14px;font-weight:700">'+esc(where)+'</div>':'')
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px;font-size:13.5px">'
+    +'<div>У тролі: ящик <b class="mo">'+esc(t.boxId)+'</b><br><b>'+pt+'%</b> · '+c.lt+' з '+t.qty+' шт'+bar(pt,'#7b4fc0')+'</div>'
+    +'<div>Цей ящик: <b class="mo">'+esc(b.boxId)+'</b><br><b>'+pb+'%</b> · '+c.lb+' з '+b.qty+' шт'+bar(pb,'#c08a4f')+'</div></div>'
+    +'<div style="margin-top:8px;font-size:14px">Після зсипання в тролі буде <b>'+(c.lt+c.lb)+' шт ('+pa+'%)</b>, а цей ящик стане порожнім — прибери його.</div>'
+    +'<div class="row"><button class="btn pr" style="height:56px;font-size:17px;flex:1;background:#6a3fb0;border-color:#6a3fb0" onclick="pourDo(\''+esc(b.boxId)+'\',\''+esc(t.boxId)+'\')">🫗 Зсипав — записати</button></div>'
+    +'<div style="font-size:12px;color:var(--mu);margin-top:4px">Не хочеш зсипати — став як звичайно (нижче).</div></div>';
+}
+async function pourDo(fromId,toId){
+  var L=S.scanLast,b=(L&&L.b&&L.b.boxId===fromId)?L.b:S.boxes[fromId],t=S.boxes[toId];if(!b||!t)return;
+  var lb=boxAmt(b),lt=boxAmt(t);
+  var r=await api('boxPour',{fromBox:fromId,toBox:toId,art:b.art,name:b.name,qtyFrom:lb,qtyTo:lt,fromLoc:b.state==='out'?(b.prev||''):(b.location||''),toLoc:t.location,fromG:((S.boxes[fromId]||{}).g||'')});
+  if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'сервер не відповів — спробуй ще раз'),'er',4500);return;}
+  delete S.boxes[fromId];t.leftRaw=String(lt+lb);t.bulbs=lt+lb;S.flash[toId]=Date.now();
+  toast('🫗 Зсипано: '+fromId+' → '+toId+' ('+t.location+'). Порожній ящик прибери.'+(r.dup?' (уже було записано)':' У «Фасовку» допишеться автоматично'),'',4500);
+  S.scanLast=null;renderScan();if(S.mode!=='scan')render();liveSoon();
+}
+// 🖨 наліпка ячейки прямо з картки скану
+function scanPrintCell(code){code=String(code||'').trim();if(!code)return;S.lbCur={kind:'cell',codes:[code]};lblPrint(1);toast('🖨 Друкую наліпку '+code,'',2200);}
 function twoChoiceHtml(b){
   var tr=trollTarget(b),np=nearestPallet(b),palTo=np?np.p:(b.prev&&!slotOf(b.prev)?b.prev:''),recT=!!tr&&!tr.busy;
   var h='<div class="two"><div class="opt'+(recT?' rec':'')+'"><div class="ot">🗄 У ТРОЛЬ</div>'
@@ -1287,17 +1349,31 @@ function scanCardHtml(L){
       +'<table class="tbl"><thead><tr><th>Ящик</th><th>Сорт</th><th>Де зараз</th><th style="text-align:right">Шт</th><th></th></tr></thead><tbody>'+bxA.map(function(x){var l=boxLeft(x);return '<tr><td class="m">'+esc(x.boxId)+'</td><td>'+esc(x.name||x.art)+'</td><td>'+(x.state==='out'?'🔄 на фасовці':esc(x.location||'—'))+'</td><td style="text-align:right"><b>'+(l==null?x.qty:l)+'</b></td><td><button class="btn sm pr" onclick="scanGo(\''+esc(x.boxId)+'\')">Це він</button></td></tr>';}).join('')+'</tbody></table></div>';}
   else if(L.err)h='<div class="scan-card bad"><div class="scan-big">❗</div><div style="font-size:18px;font-weight:800">'+esc(L.err)+'</div>'+(L.ps&&L.ps.art&&me().role!=='viewer'?'<div class="row" style="justify-content:center"><button class="btn pr" onclick="scanAddNew()">＋ Додати як новий ящик</button></div>':'')+'</div>';
   else{var b=L.b,w=L.w,l=boxLeft(b),cur=b.state==='out'?('на фасовці'+(b.ts?' з '+fmtT(b.ts):'')+(b.prev?' (взяли з '+b.prev+')':'')):(b.state==='new'?'ще не розміщений':(b.location?(slotOf(b.location)?'у ячейці ':'на палеті ')+b.location:'—'));
-    var sq=L.ps&&L.ps.qty,dq=(l==null?b.qty:l);
-    h='<div class="scan-card"><div class="scan-box">'+catTag(b)+'<div style="font-size:20px;font-weight:800;line-height:1.25">'+esc(b.name||b.art)+'</div>'
-      +'<div class="scan-ids"><span><small>Артикул</small><b class="mo">'+esc(b.art)+'</b></span><span><small>Унікальний № ящика</small><b class="mo">'+esc(b.boxId)+'</b></span><span><small>Кількість</small><b>'+esc(String(sq||dq))+' шт</b>'+(sq&&String(sq)!==String(dq)?'<em>за обліком '+esc(String(dq))+'</em>':'')+'</span></div>'
-      +'<div class="scan-meta">зараз: '+esc(cur)+'</div></div>'
-      +(b.state==='out'&&me().role!=='viewer'?'<div style="font-size:13px;font-weight:800;color:#1f5fa8;margin-top:10px">🔄 Ящик з фасовки — куди ставимо?</div>'+twoChoiceHtml(b):'<div class="scan-to'+(w.stay?' stay':'')+'"><div style="font-size:13px;font-weight:700;opacity:.8">'+(w.stay?'✓ НІКУДИ НЕ НЕСТИ':'📍 ПОСТАВ СЮДИ')+'</div>'
+    var sq=L.ps&&L.ps.qty,dq=(l==null?b.qty:l),vw=me().role==='viewer';
+    // ячейка в тролі для наліпки: куди ставимо, або де ящик уже стоїть
+    var tr0=b.state==='out'?trollTarget(b):null,cell=tr0?tr0.code:(w.lay?w.lay.code:(slotOf(w.to)?w.to:(slotOf(b.location)?b.location:'')));
+    if(!cell){try{var LYc=(S.cells&&S.cells.length)?effLayout():null,itc=LYc&&LYc.has?LYc.byArt[nk2(b.art)]:null;cell=itc?itc.code:(homeFor(b.art)||'');}catch(e){}}   // ячейка цього сорту в тролі
+    // ── ЗВЕРХУ (закріплено): що за ящик + усі кнопки ──
+    var acts='';
+    if(!vw&&b.state!=='out')acts+='<button class="btn pr sa-main" onclick="scanConfirm()">'+(w.stay?'✓ Гаразд':'✓ Поставив')+'</button>';
+    if(!vw&&w.stay&&w.to)acts+='<button class="btn sa-b" style="border-color:#2f6b4e;color:#1f4d38" onclick="scanReturnSame()">↩ Повернув сюди з фасовки</button>';
+    if(!vw&&b.state!=='out')acts+='<button class="btn sa-b" onclick="openAdd(\'\');setTimeout(function(){var i=G(\'adI\');if(i){i.value=\''+esc(b.boxId)+'\';lookupBox();}},120)">📍 Інше місце…</button>';
+    if(!vw&&b.state!=='new'&&S.boxes[b.boxId])acts+='<button class="btn sa-b" onclick="scanToPallet()">🧱 На палету…</button>';
+    if(cell)acts+='<button class="btn sa-b" style="border-color:#5a3f8f;color:#4a2f7f" onclick="scanPrintCell(\''+esc(cell)+'\')" title="Надрукувати наліпку з номером ячейки">🖨 Наліпка <span class="mo">'+esc(cell)+'</span></button>';
+    acts+='<button class="btn sa-b" onclick="scanAllOfArt()">📦 Усі ящики сорту</button><button class="btn sa-b" onclick="scanShowCab()">🗄 Показати в тролях</button>'
+      +(S.mode!=='scan'?'<button class="btn sa-b sa-x" onclick="S.scanLast=null;closeModal()" title="Закрити (Esc)">✕</button>':'');
+    h='<div class="scan-card"><div class="scan-top">'
+      +'<div class="scan-head">'+catTag(b)+'<b class="sh-n">'+esc(b.name||b.art)+'</b>'
+      +'<span class="sh-c"><small>арт</small> <b class="mo">'+esc(b.art)+'</b></span><span class="sh-c"><small>ящик</small> <b class="mo">'+esc(b.boxId)+'</b></span>'
+      +'<span class="sh-c"><b>'+esc(String(sq||dq))+' шт</b>'+(sq&&String(sq)!==String(dq)?' <em>за обліком '+esc(String(dq))+'</em>':'')+'</span>'
+      +'<span class="sh-w">зараз: '+esc(cur)+'</span></div>'
+      +'<div class="scan-acts">'+acts+'</div></div>'
+      // ── нижче: зсипання (якщо можна), куди ставити, карта ──
+      +pourHtml(b)
+      +(b.state==='out'&&!vw?'<div style="font-size:13px;font-weight:800;color:#1f5fa8;margin-top:10px">🔄 Ящик з фасовки — куди ставимо?</div>'+twoChoiceHtml(b):'<div class="scan-to'+(w.stay?' stay':'')+'"><div style="font-size:13px;font-weight:700;opacity:.8">'+(w.stay?'✓ НІКУДИ НЕ НЕСТИ':'📍 ПОСТАВ СЮДИ')+'</div>'
       +(w.needPallet?'<input id="scanPal" class="scan-pal" placeholder="№ палети" inputmode="numeric" onkeydown="if(event.key===\'Enter\')scanConfirm()">':(w.lay?'<div class="scan-code" style="font-size:30px">'+esc(physLabel(w.lay))+'</div><div style="font-size:15px;font-weight:700">адреса на наліпці: <span class="mo" style="font-size:18px">'+esc(w.lay.code)+'</span></div>':'<div class="scan-code">'+esc(w.to)+'</div><div style="font-size:15px;font-weight:700">'+esc(placeLabel(w.to))+'</div>'))
       +'<div style="font-size:13px;margin-top:4px;opacity:.85">'+esc(w.why)+'</div></div>')
       +(w.to?'<div class="fm-wrap"><div class="fm-title">Де це на складі</div>'+(w.lay?fieldMapLayout(w.lay.phys):(slotOf(w.to)?fieldMap(w.to):palletField(w.to)))+'</div>':'')
-      +(me().role!=='viewer'&&w.stay&&w.to?'<div class="row"><button class="btn" style="height:54px;font-size:16px;flex:1;border-color:#2f6b4e;color:#1f4d38" onclick="scanReturnSame()">↩ Повернув сюди з фасовки</button></div>':'')
-      +(me().role!=='viewer'&&b.state!=='out'?'<div class="row"><button class="btn pr" style="height:54px;font-size:17px;flex:1" onclick="scanConfirm()">'+(w.stay?'✓ Гаразд':'✓ Поставив')+'</button><button class="btn" style="height:54px" onclick="openAdd(\'\');setTimeout(function(){var i=G(\'adI\');if(i){i.value=\''+esc(b.boxId)+'\';lookupBox();}},120)">Інше місце…</button></div>':'')
-      +'<div class="row" style="flex-wrap:wrap;margin-top:6px">'+(me().role!=='viewer'&&b.state!=='new'&&S.boxes[b.boxId]?'<button class="btn" onclick="scanToPallet()">🧱 На палету…</button>':'')+'<button class="btn" onclick="scanAllOfArt()">📦 Усі ящики сорту</button><button class="btn" onclick="scanShowCab()">🗄 Показати в тролях</button>'+(S.mode!=='scan'?'<button class="btn" onclick="S.scanLast=null;closeModal()">Закрити</button>':'')+'</div>'
       +'</div>';}
   return h;
 }
