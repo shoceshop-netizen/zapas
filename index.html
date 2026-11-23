@@ -331,7 +331,7 @@ tr.au-ok td{background:#eef9f1}tr.au-wait td{color:#8a958e}tr.au-x td{background
 <script>
 // ===== Окрема програма: власний бекенд (цей самий Apps Script), власний вхід за PIN =====
 var AUTH_KEY='palety_session_v1';
-var APP_BUILD='20.11.2026 · кнопки скану зверху (p1.18)';
+var APP_BUILD='23.11.2026 · тролі Т1–Т40 по 18 ящ. (p1.19)';
 var PER_LAYER=5;
 function G(id){return document.getElementById(id);}
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -363,6 +363,7 @@ function api(action,data){
   return new Promise(function(res){
     // кожен запис має свій номер: якщо запит повториться (друга адреса, повтор, подвійний клік) — сервер не запише вдруге
     var WR={palletBox:1,palletBoxMany:1,boxPour:1,palletSlotsSave:1,cellAssign:1,userSave:1,layoutSave:1};
+    if(action==='palletBox'&&data&&data.pallet)data.pallet=normPlace(data.pallet);
     if(WR[action]){data=data||{};if(!data.rid)data.rid=Date.now().toString(36)+Math.random().toString(36).slice(2,9);}
     var body={action:action,data:data||{},token:''};
     if(action!=='login'){var s=sess();body.token=s?s.token:'';}
@@ -439,7 +440,7 @@ async function saveUser(row){
 var S={cat:'',stock:[],byId:{},slots:{},manual:[],locs:{},at:0,q:'',kind:'all',pending:{},saveT:null,fresh:{},loading:false,open:null,hideEmpty:false,mode:(localStorage.getItem('plMode')||'pal'),cells:[],fixed:[],cellsLoading:false,cellsErr:'',cabStockOnly:true,cabTodoOnly:false,cabHideEmpty:(localStorage.getItem('cabHideEmpty')!=='0'),cabCompact:false};
 var COLORS=[['#eaf2ff','#2f6fd0'],['#e9f7ee','#2e9a55'],['#fff3df','#d98a00'],['#f5ebfb','#8e44c4'],['#e6f6f4','#139186'],['#fdeaef','#d0436b']];
 function color(art){var h=0,s=String(art||'');for(var i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>0;return COLORS[h%COLORS.length];}
-function kindOf(loc){loc=String(loc||'').trim();if(/^\d{1,5}$/.test(loc))return 'pal';if(/^\d+(-\d+){2,}$/.test(loc))return 'cell';return 'other';}
+function kindOf(loc){loc=String(loc||'').trim();if(/^\d{1,5}$/.test(loc))return 'pal';if(normTroll(loc))return 'troll';if(/^\d+(-\d+){2,}$/.test(loc))return 'cell';return 'other';}
 function rowObj(r){if(!r||!String(r[0]||'').trim())return null;return {art:String(r[0]).trim(),boxId:String(r[1]||'').trim(),qty:parseInt(r[2]||0)||0,name:String(r[3]||'').trim(),size:String(r[4]||'').trim(),supplier:String(r[5]||'').trim(),location:String(r[6]||'').trim(),bulbs:parseInt(r[7]||0)||0,leftRaw:(r[7]==null?'':String(r[7]).trim()),date:String(r[8]||'').trim(),boxStatus:String(r[9]||'').trim()};}
 // ===== НАЖИВО з «Фасовка 2026»: де кожен ящик ЗАРАЗ (на місці / на фасовці), оновлення кожні 20 с =====
 S.boxes={};S.events=[];S.hash='';S.liveAt=0;S.liveReady=false;S.flash={};
@@ -565,9 +566,9 @@ function saveSoon(){if(S.saveT)clearTimeout(S.saveT);S.saveT=setTimeout(async fu
 // ===== Малювання: групи палет (діапазони з файлу), міні-палети, панель палети =====
 var GAP=25;          // розрив між номерами, після якого починається нова група (1–70 … 300–400)
 function match(b,q){if(!q)return true;return (b.art+' '+b.boxId+' '+b.name+' '+(b.size||'')+' '+(b.supplier||'')).toLowerCase().indexOf(q)>=0;}
-function pHit(P,q){return !!q&&(P.p.toLowerCase()===q||P.slots.some(function(id){return id&&P.on[id]&&match(P.on[id].b,q);}));}
+function pHit(P,q){return !!q&&(P.p.toLowerCase()===q||(!!normTroll(q)&&P.p===normTroll(q))||P.slots.some(function(id){return id&&P.on[id]&&match(P.on[id].b,q);}));}
 function groups(all){
-  var byNum={},others=[],cells=[];all.forEach(function(P){if(P.kind==='pal')byNum[parseInt(P.p,10)]=P;else if(P.kind==='cell')cells.push(P);else others.push(P);});
+  var byNum={},others=[],cells=[];all.forEach(function(P){if(P.kind==='pal')byNum[parseInt(P.p,10)]=P;else if(P.kind==='cell'||P.kind==='troll')cells.push(P);else others.push(P);});
   var nums={};Object.keys(byNum).forEach(function(n){nums[n]=1;});
   Object.keys(S.locs||{}).concat(Object.keys(S.slots||{})).forEach(function(p){if(/^\d{1,5}$/.test(p.trim()))nums[parseInt(p,10)]=1;});
   var arr=Object.keys(nums).map(Number).sort(function(a,b){return a-b;}),gs=[],cur=null;
@@ -575,6 +576,7 @@ function groups(all){
   var out=gs.map(function(g){var list=[];for(var n=g.min;n<=g.max;n++){if(g.max-g.min>600&&!nums[n])continue;list.push(byNum[n]||{p:String(n),kind:'pal',slots:[],on:{},n:0});}
     var t=g.min===g.max?'Палета '+g.min:'Палети '+g.min+'–'+g.max;
     return {id:'g'+g.min,title:(g.cold?'❄ Холодильник · ':'')+t,short:(g.cold?'❄ ':'')+(g.min===g.max?String(g.min):g.min+'–'+g.max),list:list};});
+  var tr=trollRows(all);if(tr.length)out.push({id:'gtroll',title:'🗄 Тролі',short:'🗄 Т',troll:true,list:tr.map(function(T){return trollMerged(T,all);})});
   if(others.length)out.push({id:'goth',title:'Інше',short:'Інше',list:others.sort(function(a,b){return a.p.localeCompare(b.p,'uk',{numeric:true});})});
   return out;
 }
@@ -584,8 +586,8 @@ function mini(P,q){
   for(var l=show-1;l>=0;l--){rows+='<div class="mrow">';for(var k=0;k<PER_LAYER;k++){var i=l*PER_LAYER+k;if(i>=P.slots.length){rows+='<i class="mx none"></i>';continue;}var id=P.slots[i];
     if(!id){rows+='<i class="mx gap"></i>';continue;}var x0=P.on[id],b=x0.b,c=color(b.art);rows+=x0.ghost?'<i class="mx ghost"></i>':'<i class="mx'+(q&&match(b,q)?' hl':'')+'" style="background:'+c[1]+'"></i>';}rows+='</div>';}
   var anyNew=P.slots.some(function(id){return id&&S.fresh[id];});
-  return '<button type="button" class="mp'+(P.n?'':' empty')+(hit?' hit':'')+(dim?' dim':'')+(anyNew?' new':'')+'" onclick="openPallet(\''+esc(P.p)+'\')" title="Палета '+esc(P.p)+'">'
-    +'<div class="mh"><span class="mn">'+esc(P.p)+'</span>'+(P.n?'<span class="mc">'+P.n+' ящ.</span>':'')+(P.g?'<span class="mc" style="background:#e3edfb;color:#1f4a86" title="на фасовці">🔄'+P.g+'</span>':'')+'</div>'
+  return '<button type="button" class="mp'+(P.n?'':' empty')+(hit?' hit':'')+(dim?' dim':'')+(anyNew?' new':'')+'" onclick="openPallet(\''+esc(P.p)+'\')" title="'+(P.kind==='troll'?'Троль ':'Палета ')+esc(P.p)+'">'
+    +'<div class="mh"><span class="mn">'+esc(P.p)+'</span>'+(P.kind==='troll'?'<span class="mc"'+(P.n>=TROLL_CAP?' style="background:#fde2df;color:#b42318"':'')+'>'+P.n+'/'+TROLL_CAP+'</span>':(P.n?'<span class="mc">'+P.n+' ящ.</span>':''))+(P.g?'<span class="mc" style="background:#e3edfb;color:#1f4a86" title="на фасовці">🔄'+P.g+'</span>':'')+'</div>'
     +'<div class="ms">'+(P.n||P.g?(L>show?'<div class="mmore">+'+(L-show)+' шар.</div>':'')+rows:'<span class="me">порожня</span>')+'</div>'
     +'<div class="mbase"></div><div class="mv">'+(function(){var seen={},h2='';P.slots.forEach(function(id){var x=id&&P.on[id];if(!x)return;var c=catOf(x.b);if(c&&!seen[c.k]){seen[c.k]=1;h2+='<i class="cdot" title="'+c.l+'" style="background:'+c.c+'"></i>';}});return h2;})()+esc(topVariety(P)||' ')+'</div></button>';
 }
@@ -623,14 +625,15 @@ function render(){
   var head='<header class="bar"><button class="bb" onclick="sideOpen()" title="Меню" style="font-size:20px;padding:0 12px">☰</button>'
     +'<div class="ttl" title="версія '+esc(APP_BUILD)+'">'+ttl+'<small>'+esc(u.name||u.login||'')+' · '+boxes+' ящ. · '+(S.stale?'<span style="color:#ffe08a">⏳ дані з '+new Date(S.stale).toTimeString().slice(0,5)+', оновлюю…</span> · ':'')+'<span class="ldot" style="width:7px;height:7px"></span> <span id="liveDot">наживо · '+(S.liveAt?new Date(S.liveAt).toTimeString().slice(0,8):'…')+(S.fq>0?' · 📤 у «Фасовку» в черзі: '+S.fq:'')+'</span></small></div><span class="sp"></span>'
     +'<div class="seg"><button class="'+(S.mode==='cab'?'on':'')+'" onclick="setMode(\'cab\')">🗄 Тролі</button><button class="'+(S.mode==='pal'?'on':'')+'" onclick="setMode(\'pal\')">🧱 Палети</button></div></header>'
-    +'<div class="ubar"><input id="q" class="uin" autocomplete="off" placeholder="'+(S.mode==='label'?(S.lbKind==='cell'?'🔢 Номер ячейки 10-04-2-2, секція 10-04, троль 10 — або скануй ящик':'📷 Скануй ящик для дубля наліпки'):'📷 Скануй ящик — або № палети, артикул, назва…')+'" value="'+esc(S.q)+'" onkeydown="scanKey(event,this,uGo)" oninput="uInput(this)"><button class="btn pr ubtn" onclick="uGo()">Знайти</button></div>'
+    +'<div class="ubar"><input id="q" class="uin" autocomplete="off" placeholder="'+(S.mode==='label'?(S.lbKind==='cell'?'🔢 Троль: Т10 (або 10) — або скануй ящик; стара ячейка 10-04-2-2':'📷 Скануй ящик для дубля наліпки'):'📷 Скануй ящик — або № палети, артикул, назва…')+'" value="'+esc(S.q)+'" onkeydown="scanKey(event,this,uGo)" oninput="uInput(this)"><button class="btn pr ubtn" onclick="uGo()">Знайти</button></div>'
     +filterBar()+(S.side?sideHtml(gs):'');
   if(S.mode==='label'){G('app').innerHTML=head+'<div class="wrap" style="max-width:1180px"><div id="lbPage"></div></div>';renderLabelPage();var il=G('q');if(il&&!S.side)il.focus({preventScroll:true});return;}
   if(S.mode==='audit'){G('app').innerHTML=head+renderAudit();var ia=G('q');if(ia&&!S.side)ia.focus({preventScroll:true});return;}
   if(S.mode==='check'){G('app').innerHTML=head+renderCheck();if(act){var ic=G('q');if(ic)ic.focus();}return;}
   if(S.mode==='scan'){var keepLast=S.scanLast;G('app').innerHTML=head+scanPageHtml();S.scanLast=keepLast;renderScan();var is=G('q');if(is&&!G('scanPal')&&!S.side)is.focus({preventScroll:true});return;}
-  if(S.mode==='cab'){G('app').innerHTML=head+'<div class="wrap">'+renderCabs(q)+'</div>';S.fresh={};if(act){var i0=G('q');if(i0){i0.focus();i0.setSelectionRange(i0.value.length,i0.value.length);}}return;}
+  if(S.mode==='cab'&&S.cabCells){G('app').innerHTML=head+'<div class="wrap">'+renderCabs(q)+'</div>';S.fresh={};if(act){var i0=G('q');if(i0){i0.focus();i0.setSelectionRange(i0.value.length,i0.value.length);}}return;}
   var h=head+'<div class="wrap">';
+  if(S.mode==='cab'){gs=gs.filter(function(g){return g.troll;});h+='<div class="found" style="margin:12px 0 0">🗄 Троль = проліт на '+TROLL_CAP+' ящ. Ящики ставимо по порядку: спершу заповнюємо Т1, потім Т2 і далі — у будь-яке вільне місце; у програмі місце пишеться <b class="mo">Т1</b>, <b class="mo">Т2</b>… Скануй наліпку «Т5» або впиши Т5 — відкриється троль.</div>';}
   if(!gs.length)h+='<div class="emptyall">'+(S.loading?'Завантажую палети…':'Поки нема палет')+'</div>';
   gs.forEach(function(g){
     var list=g.list.filter(function(P){return !(S.hideEmpty&&!P.n)&&!(q&&!pHit(P,q))&&(!S.cat||P.slots.some(function(id){return id&&P.on[id]&&catOk(P.on[id].b);}));});
@@ -664,7 +667,7 @@ function sideHtml(gs){
     +b("sideGo('openOut()')",'🔄 На фасовці зараз <span class="ckn" style="background:#3a7bd5">'+cnt+'</span>')
     +b("sideGo('openFeed()')",'📜 Події наживо')
     +b("sideGo('load()')",(S.loading?'⏳':'⟳')+' Оновити дані')+'</div>';
-  if(S.mode==='cab')h+='<div class="ssec"><div class="stit">Тролі</div><div class="swrap">'+cabTools()+'</div>'
+  if(S.mode==='cab')h+='<div class="ssec"><div class="stit">Тролі</div><label class="tg" style="margin-bottom:8px"><input type="checkbox" '+(S.cabCells?'checked':'')+' onchange="S.cabCells=this.checked;try{localStorage.setItem(\'cabCells\',this.checked?\'1\':\'0\');}catch(e){}render()">старий вигляд — ячейками</label><label class="tg" style="margin-bottom:8px"><input type="checkbox" '+(S.hideEmpty?'checked':'')+' onchange="S.hideEmpty=this.checked;render()">сховати порожні</label><div class="swrap">'+(S.cabCells?cabTools():'<button class="btn" onclick="sideGo(\'openPickList()\')">📋 Список відбору в тролі</button>')+'</div>'
     +'<div class="stit" style="margin-top:10px">Перейти до</div><div class="swrap">'+(function(){var M=cabModel(),rows={};Object.keys(M.cabs).forEach(function(kk){rows[M.cabs[kk].row]=(rows[M.cabs[kk].row]||0)+1;});return Object.keys(rows).sort(function(a,c){return +a-+c;}).map(function(r){return '<button type="button" class="gc" onclick="sideGo(\'var e=document.getElementById(\\\'row'+r+'\\\');if(e)e.scrollIntoView({behavior:\\\'smooth\\\'})\')">Троль '+r+'<span>'+rows[r]+' секц.</span></button>';}).join('');})()+'</div></div>';
   if(S.mode==='pal')h+='<div class="ssec"><div class="stit">Палети</div><label class="tg" style="margin-bottom:8px"><input type="checkbox" '+(S.hideEmpty?'checked':'')+' onchange="S.hideEmpty=this.checked;render()">сховати порожні</label>'
     +'<div class="swrap">'+gs.map(function(g){var f=g.list.filter(function(P){return P.n;}).length;return '<button type="button" class="gc" onclick="sideGo(\'var e=document.getElementById(\\\''+g.id+'\\\');if(e)e.scrollIntoView({behavior:\\\'smooth\\\'})\')">'+esc(g.short)+'<span>'+f+'/'+g.list.length+'</span></button>';}).join('')+'</div></div>';
@@ -688,6 +691,36 @@ function filterBar(){
 var SHELVES=6,PER_SHELF=3;   // у кожній тролі 6 поличок по 3 ящики   // у кожній тролі завжди 5 поличок по 3 ящики
 function secOf(s){return s?s.cab.split('-')[1]:'';}
 function slotOf(code){var m=String(code||'').trim().match(/^(\d+)\s*[-.\/ ]\s*(\d+)\s*[-.\/ ]\s*(\d+)\s*[-.\/ ]\s*(\d+)$/);if(!m)return null;var cb=('0'+m[2]).slice(-Math.max(2,m[2].length));return {row:m[1],cab:m[1]+'-'+cb,shelf:+m[3],pos:+m[4],slot:Math.ceil(+m[4]/2)};}
+// ===== 🗄 ТРОЛЬ = ПРОЛІТ НА 18 ЯЩИКІВ (p1.19) =====
+// Тролі (прольоти) пронумеровані підряд: Т1, Т2, … Т40. У кожному 6 поличок по 3 = 18 ящиків.
+// Ящик ставимо в будь-яке вільне місце; у програмі місце — «Т<номер>». Будь-який ящик іде в ПЕРШИЙ по порядку троль, де є місце.
+// Латинська T, мала т/t, «троль 10», «Е10» (сканер при українській розкладці) — усе зводимо до «Т10».
+var TROLL_CAP=18;
+function normTroll(v){var m=String(v==null?'':v).trim().match(/^(?:[TtТтЕе]|троль|trol)\s*[-.№#]?\s*(\d{1,3})$/i);return m&&+m[1]>0?'Т'+(+m[1]):'';}
+function normPlace(v){var t=String(v==null?'':v).trim();return normTroll(t)||t;}
+// прольоти з файлу ячейок по порядку (10-01, 10-02, … 11-01, …) → Т1, Т2, …  — щоб старі адреси ячейок показати у своєму Т
+function trollSecs(){var k=(S.cells||[]).length+'|'+(S.fixed||[]).length;if(S._tsec&&S._tsec.k===k)return S._tsec;
+  var keys=[];try{keys=Object.keys(cabModel().cabs);}catch(e){}
+  keys.sort(function(a,b){var x=a.split('-'),y=b.split('-');return (+x[0])-(+y[0])||(+x[1])-(+y[1]);});
+  var by={};keys.forEach(function(c,i){by[c]=String(i+1);});S._tsec={k:k,list:keys,by:by};return S._tsec;}
+// номер троля для місця: «Т10» → "10"; стара адреса ячейки 10-04-2-2 → номер її прольоту
+function trollOf(loc){var t=normTroll(loc);if(t)return t.slice(1);var s=slotOf(loc);if(!s)return '';return trollSecs().by[s.cab]||'';}
+function trollSecOf(T){return trollSecs().list[(+T)-1]||'';}
+// скільки тролів: прольоти з файлу ячейок (або більший номер, який уже трапився); якщо файлу нема — 40
+function trollTotal(){var n=trollSecs().list.length;Object.keys(S.boxes).forEach(function(id){var t=normTroll(S.boxes[id].location);if(t&&+t.slice(1)>n)n=+t.slice(1);});return n||40;}
+function trollFill(exceptId){var c={};Object.keys(S.boxes).forEach(function(id){if(id===exceptId)return;var x=S.boxes[id];if(x.state!=='in')return;var T=trollOf(x.location);if(T)c[T]=(c[T]||0)+1;});return c;}
+// перший по порядку троль, де є вільне місце
+function freeTroll(exceptId,fill){var c=fill||trollFill(exceptId),N=trollTotal();for(var i=1;i<=N;i++){var n=c[String(i)]||0;if(n<TROLL_CAP)return {T:String(i),n:n};}return null;}
+function trollEligible(b){return !!b&&!noTroll(b)&&!fromCold(b);}
+// троль як одна «палета»: ящики з «Т10» + ящики, ще записані старими адресами ячейок цього прольоту
+function trollMerged(T,all){
+  all=all||build();var ps=all.filter(function(P){return (P.kind==='troll'||P.kind==='cell')&&trollOf(P.p)===T;}),main=null;
+  ps.forEach(function(P){if(P.p==='Т'+T)main=P;});
+  var slots=main?main.slots.slice():[],on={},n=0,g=0,old=0;
+  ps.forEach(function(P){Object.keys(P.on).forEach(function(id){on[id]=P.on[id];});n+=P.n;g+=P.g||0;if(P!==main){if(P.kind==='cell')old+=P.n;P.slots.forEach(function(id){if(id&&slots.indexOf(id)<0)slots.push(id);});}});
+  return {p:'Т'+T,kind:'troll',troll:T,sec:trollSecOf(T),slots:slots,on:on,n:n,g:g,old:old,cap:TROLL_CAP};
+}
+function trollRows(all){var N=trollTotal(),r={};for(var i=1;i<=N;i++)r[String(i)]=1;(all||[]).forEach(function(P){if(P.kind==='troll'||P.kind==='cell'){var T=trollOf(P.p);if(T)r[T]=1;}});return Object.keys(r).sort(function(a,b){return +a-+b;});}
 function nk2(a){return String(a||'').trim().replace(/^0+(?=\d)/,'');}
 function cabModel(){
   var cells={};(S.cells||[]).forEach(function(r){cells[r[0]]={art:r[1],name:r[2]};});
@@ -714,7 +747,7 @@ function coldByArt(){var place=placements(),out={};Object.keys(place).forEach(fu
 var NO_TROLL_RE=/^\s*(цибул|часник|чеснок|шалот|onion|garlic)/i;
 function noTroll(b){return NO_TROLL_RE.test(String(b&&b.name||''));}
 function fromCold(b){return !!b&&isCold(b.state==='out'?b.prev:b.location);}
-function reserveByArt(){var place=placements(),out={};Object.keys(place).forEach(function(id){var x=place[id];if(x.ghost||slotOf(x.p)||(COLD_EXCL&&isCold(x.p))||noTroll(x.b))return;var a=nk2(x.b.art);(out[a]=out[a]||[]).push({id:id,p:x.p,b:x.b});});
+function reserveByArt(){var place=placements(),out={};Object.keys(place).forEach(function(id){var x=place[id];if(x.ghost||trollOf(x.p)||(COLD_EXCL&&isCold(x.p))||noTroll(x.b))return;var a=nk2(x.b.art);(out[a]=out[a]||[]).push({id:id,p:x.p,b:x.b});});
   Object.keys(out).forEach(function(a){out[a].sort(function(u,v){return dateKey(u.b.date).localeCompare(dateKey(v.b.date));});});return out;}
 // ячейки, куди треба покласти ящик із запасу (сорт закріплений, ячейка порожня, а в запасі він є)
 function cabTodo(){var M=cabModel(),occ=cellOcc(),RES=reserveByArt(),out=[];
@@ -849,7 +882,7 @@ async function cellAssign(code,clear){
   closeModal();toast(clear?'Ячейку '+code+' відкріплено':'📌 '+code+' → '+art,'',2200);render();
 }
 
-function palletByName(p){var all=build();var P=all.filter(function(x){return x.p===p||(/^\d+$/.test(p)&&x.kind==='pal'&&parseInt(x.p,10)===parseInt(p,10));})[0];return P||{p:p,kind:kindOf(p),slots:[],on:{},n:0};}
+function palletByName(p){var all=build();var nt=normTroll(p);if(nt)return trollMerged(nt.slice(1),all);var P=all.filter(function(x){return x.p===p||(/^\d+$/.test(p)&&x.kind==='pal'&&parseInt(x.p,10)===parseInt(p,10));})[0];return P||{p:p,kind:kindOf(p),slots:[],on:{},n:0};}
 function setMode(m){S.mode=m;S.side=false;try{localStorage.setItem('plMode',m);}catch(e){}S.open=null;var o=G('ov');if(o)o.remove();render();window.scrollTo(0,0);}
 // ===== 📐 ПЛАН РОЗКЛАДКИ ВСІХ ШАФ =====
 // 1) Троль задіяна, якщо в ній буде ≥ minCab ящиків (вже лежать + свої сорти, що є в запасі). Порожні й ті, де 0–3 ящики, не чіпаємо — ці сорти лишаються на палетах.
@@ -1077,7 +1110,7 @@ async function returnHere0(id,to){
 function artPlaces(art,targetCode){
   var u=me(),A=nk2(art),L=Object.keys(S.boxes).map(function(id){return S.boxes[id];}).filter(function(b){return nk2(b.art)===A&&(b.state==='in'||b.state==='out');});
   if(!L.length)return '<div class="warn">Ящиків цього сорту немає ні в тролях, ні в запасі.</div>';
-  var rank=function(b){if(b.state==='out')return 3;if(slotOf(b.location))return 0;return /^\d+$/.test(b.location)?1:2;};
+  var rank=function(b){if(b.state==='out')return 3;if(trollOf(b.location))return 0;return /^\d+$/.test(b.location)?1:2;};
   L.sort(function(a,b){return rank(a)-rank(b)||String(a.location).localeCompare(String(b.location),'uk',{numeric:true})||dateKey(a.date).localeCompare(dateKey(b.date));});
   var pcs=0,where={};L.forEach(function(b){var l=boxLeft(b);pcs+=(l==null?(b.qty||0):Math.max(0,l));var w=b.state==='out'?'на фасовці':b.location;where[w]=(where[w]||0)+1;});
   var tk=targetCode?slotKeyOf(targetCode):'';
@@ -1085,7 +1118,7 @@ function artPlaces(art,targetCode){
     +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px">'+Object.keys(where).map(function(w){return '<span class="chip">'+esc(w)+' <b>× '+where[w]+'</b></span>';}).join('')+'</div>'
     +'<div style="max-height:260px;overflow:auto;border:1px solid var(--bo);border-radius:10px"><table class="tbl" style="margin:0"><thead><tr><th>Ящик</th><th>Де лежить</th><th style="text-align:right">Шт</th><th></th></tr></thead><tbody>'
     +L.map(function(b){var l=boxLeft(b),inT=tk&&b.state==='in'&&slotOf(b.location)&&slotKeyOf(b.location)===tk;
-      var w=b.state==='out'?'🔄 на фасовці'+(b.prev?' (з '+esc(b.prev)+')':''):(slotOf(b.location)?'🗄 '+esc(b.location):'🧱 '+esc(b.location));
+      var w=b.state==='out'?'🔄 на фасовці'+(b.prev?' (з '+esc(b.prev)+')':''):(trollOf(b.location)?'🗄 '+esc(b.location):'🧱 '+esc(b.location));
       return '<tr'+(inT?' style="background:#e3f1e8"':'')+'><td class="m">'+esc(b.boxId)+'</td><td>'+w+(inT?' <b>· тут</b>':'')+'</td><td style="text-align:right"><b>'+(l==null?b.qty:l)+'</b></td><td>'+(u.role!=='viewer'&&targetCode&&b.state==='in'&&!inT?'<button class="btn sm pr" onclick="moveBox(\''+esc(b.boxId)+'\',\''+esc(targetCode)+'\')">🗄 Сюди</button>':'')+(u.role!=='viewer'&&targetCode&&b.state==='out'?'<button class="btn sm" style="border-color:#2f6b4e;color:#1f4d38;font-weight:800" onclick="askReturn(\''+esc(b.boxId)+'\',\''+esc(targetCode)+'\')">↩ Сюди</button>':'')+'</td></tr>';}).join('')
     +'</tbody></table></div>';
 }
@@ -1185,35 +1218,17 @@ function nearestPallet(b){
 }
 function whereTo(b){
   if(noTroll(b)||fromCold(b)){var idN=b.boxId,curN=b.state==='out'?'':(b.location||''),prevN=b.state==='out'?(b.prev||''):'',bnN=noTroll(b)?'Цибулю й часник у тролі не ставимо — ':'Ящик з холодильника (палети '+COLD.from+'–'+COLD.to+') у тролі не ставимо — ';
-    if(curN&&!slotOf(curN)){var cN=palletCounts(idN)[curN]||0;if(cN<PAL_CAP)return {to:curN,why:bnN+'лишається на палеті '+curN,stay:true};}
+    if(curN&&!trollOf(curN)){var cN=palletCounts(idN)[curN]||0;if(cN<PAL_CAP)return {to:curN,why:bnN+'лишається на палеті '+curN,stay:true};}
     var npN=nearestPallet(b);if(npN)return {to:npN.p,why:bnN+'на найближчу палету з місцем: '+npN.p+' (там '+npN.n+' з '+PAL_CAP+')'};
-    if(b.state==='out'&&prevN&&!slotOf(prevN))return {to:prevN,why:bnN+'повертається на палету, звідки взяли'};
+    if(b.state==='out'&&prevN&&!trollOf(prevN))return {to:prevN,why:bnN+'повертається на палету, звідки взяли'};
     return {to:'',why:bnN+'вибери палету',needPallet:true};}
-  var LYw=(S.cells&&S.cells.length)?effLayout():null;
-  if(LYw&&LYw.has){
-    var idL=b.boxId,artL=b.art,curL=b.state==='out'?'':(b.location||''),prevL=b.state==='out'?(b.prev||''):'',it=LYw.byArt[nk2(artL)],bn='';
-    if(it){var key=slotKeyOf(it.code),all=(cellOcc()[key]||[]).filter(function(x){return x.id!==idL;}),own=all.filter(function(x){return nk2(x.b.art)===nk2(artL);}),forn=all.filter(function(x){return nk2(x.b.art)!==nk2(artL);});
-      if(curL&&slotKeyOf(curL)===key)return {to:curL,lay:it,why:'Уже на своєму місці в тролі',stay:true};
-      if(!all.length)return {to:it.code,lay:it,why:(b.state==='out'?'З фасовки — у троль: ':'')+'місце за розкладкою вільне'};
-      bn=own.length?'У тролі вже є цей сорт — ':'Своє місце тимчасово зайняв сусідній сорт ('+(forn[0].b.name||forn[0].b.art)+') — ';}
-    else bn='Сорту нема в розкладці тролів — ';
-    var bc=borrowCell(curL||prevL,artL,idL);
-    if(bc){var lay2=Object.assign({},bc,{code:bc.code+' (ячейка сусіднього сорту '+(bc.name||bc.art)+')'});
-      if(curL)return {to:curL,lay:lay2,why:bn+'стоїть тимчасово в ячейці сусіднього сорту — лишається',stay:true};
-      return {to:prevL,lay:lay2,why:bn+'повертається в ячейку сусіднього сорту, звідки взяли'};}
-    if(curL&&!slotOf(curL)){var c2=palletCounts(idL)[curL]||0;if(c2<PAL_CAP)return {to:curL,why:bn+'лишається в запасі на палеті '+curL+' ('+(c2+1)+' з '+PAL_CAP+')',stay:true};}
-    var np2=nearestPallet(b);if(np2)return {to:np2.p,why:bn+'у запас — найближча палета з місцем: '+np2.p+' (там '+np2.n+' з '+PAL_CAP+')'};
-    if(b.state==='out'&&prevL)return {to:prevL,why:bn+'повертається туди, звідки взяли'};
-    return {to:'',why:bn+'вибери палету запасу',needPallet:true};
-  }
-  // 1) троль — пріоритет: своя ячейка з файлу вільна (у тролі цього сорту ще нема) → туди
-  // 2) ящик цього сорту вже в ячейці → у ЗАПАС на найближчу палету, де менше 25 ящиків
-  var id=b.boxId,art=b.art,cur=b.state==='out'?'':(b.location||''),prev=b.state==='out'?(b.prev||''):'';
-  var home=homeFor(art);
-  if(cur&&slotOf(cur)&&home&&slotKeyOf(cur)===slotKeyOf(home))return {to:cur,why:'Уже на своєму місці в тролі',stay:true};
-  if(home){var hf=homeFree(art,id);if(!hf.busy)return {to:home,why:(b.state==='out'?'З фасовки — у троль: ':'')+'своя ячейка вільна, у тролі цього сорту ще нема (адреса з файлу, як на наліпці)'};}
-  var busyNote=home?'У тролі вже є цей сорт ('+home+') — ':'';
-  if(cur&&!slotOf(cur)){var cc=palletCounts(id)[cur]||0;if(cc<PAL_CAP)return {to:cur,why:busyNote+'лишається в запасі на палеті '+cur+' ('+(cc+1)+' з '+PAL_CAP+')',stay:true};}
+  // будь-який ящик (крім цибулі/часнику й холодильника) — у перший по порядку троль, де є вільне місце
+  var id=b.boxId,cur=b.state==='out'?'':(b.location||''),prev=b.state==='out'?(b.prev||''):'',Tc=trollOf(cur);
+  if(Tc)return {to:cur,troll:Tc,why:'Уже в тролі Т'+Tc+(slotOf(cur)?' (записаний старою адресою ячейки '+cur+')':''),stay:true};
+  var ft=freeTroll(id);
+  if(ft)return {to:'Т'+ft.T,troll:ft.T,why:(b.state==='out'?'З фасовки — ':'')+'перший троль по порядку, де є місце (там '+ft.n+' з '+TROLL_CAP+') — став у будь-яке вільне місце'};
+  var busyNote='Усі тролі заповнені ('+trollTotal()+' × '+TROLL_CAP+') — ';
+  if(cur){var cc=palletCounts(id)[cur]||0;if(cc<PAL_CAP)return {to:cur,why:busyNote+'лишається на палеті '+cur,stay:true};}
   var np=nearestPallet(b);
   if(np)return {to:np.p,why:busyNote+'у запас — найближча палета з місцем: '+np.p+' (там '+np.n+' з '+PAL_CAP+')'};
   if(b.state==='out'&&prev)return {to:prev,why:busyNote+'повертається туди, звідки взяли'};
@@ -1247,7 +1262,7 @@ function palletField(p){
     h+='<div class="fm-row'+(has?' cur':'')+'"><div class="fm-rh">'+esc(g.title)+'</div><div class="fm-pals">'+g.list.map(function(P){var me2=P.p===p;return '<b class="'+(me2?'here':(P.n?'on':'off'))+'"'+(me2?' id="fmT"':'')+'>'+esc(P.p)+'</b>';}).join('')+'</div></div>';});
   return h+'</div>';
 }
-function placeLabel(to){var s=slotOf(to);if(s)return 'Троль '+s.row+' · секція '+secOf(s)+' · поличка '+s.shelf+' · місце '+s.slot;if(!to)return '';return isCold(to)?'❄ Холодильник · палета '+to:'Палета запасу '+to;}
+function placeLabel(to){var nt=normTroll(to);if(nt){var sc=trollSecOf(nt.slice(1));return '🗄 Троль '+nt.slice(1)+(sc?' (проліт '+sc+')':'')+' — у будь-яке вільне місце, пиши '+nt;}var s=slotOf(to);if(s)return 'Троль '+s.row+' · секція '+secOf(s)+' · поличка '+s.shelf+' · місце '+s.slot;if(!to)return '';return isCold(to)?'❄ Холодильник · палета '+to:'Палета запасу '+to;}
 async function scanGo(val){
   var inp=G('q'),raw=val!=null?String(val):(inp?inp.value:''),ps=parseScan(raw),id=ps.id;if(!id)return;
   if(inp&&val==null){inp.value='';S.q='';}
@@ -1273,7 +1288,7 @@ async function scanConfirm(){
   _scBusy=Date.now();try{await scanConfirm0();}finally{_scBusy=0;}
 }
 async function scanConfirm0(){
-  var L=S.scanLast;if(!L||!L.b)return;var to=L.w&&L.w.to;if(L.w&&L.w.needPallet){to=String((G('scanPal')||{}).value||'').trim();if(!to){toast('Вкажи палету','wa');return;}}
+  var L=S.scanLast;if(!L||!L.b)return;var to=L.w&&L.w.to;if(L.w&&L.w.needPallet){to=normPlace((G('scanPal')||{}).value||'');if(!to){toast('Вкажи палету','wa');return;}}
   if(L.b.state==='out'&&S.boxes[L.b.boxId]){askReturn(L.b.boxId,to);return;}
   var b=L.b,from=b.state==='out'?(b.prev||''):(b.location||'');
   if(L.w&&L.w.stay&&from===to){toast('✓ Лишається на місці','',1500);S.scanLast=null;renderScan();return;}
@@ -1285,23 +1300,18 @@ async function scanConfirm0(){
 }
 function scanAddNew(){var L=S.scanLast;if(!L||!L.ps)return;var raw=L.ps.raw;openAdd('');setTimeout(function(){var i=G('adI');if(i){i.value=raw;lookupBox();}},120);}
 function trollTarget(b){
-  if(noTroll(b)||fromCold(b))return null;
-  var LY=(S.cells&&S.cells.length)?effLayout():null;
-  if(LY&&LY.has){var it=LY.byArt[nk2(b.art)],bc=borrowCell(b.prev,b.art,b.boxId);
-    if(it){var oth=(cellOcc()[slotKeyOf(it.code)]||[]).filter(function(x){return x.id!==b.boxId;});if(!oth.length||!bc)return {to:it.code,label:physLabel(it),code:it.code,busy:oth.length>0};}
-    if(bc)return {to:b.prev,label:physLabel(bc)+' · ячейка сусіднього сорту',code:bc.code,busy:false};
-    return null;}
-  var home=homeFor(b.art);if(!home)return null;var hf=homeFree(b.art,b.boxId),s0=slotOf(home);return {to:home,label:'Троль '+s0.row+' · секція '+secOf(s0)+' · поличка '+s0.shelf+' · місце '+s0.slot,code:home,busy:!!hf.busy};
+  if(!trollEligible(b))return null;var ft=freeTroll(b.boxId);if(!ft)return null;
+  return {to:'Т'+ft.T,label:'Троль '+ft.T,code:'Т'+ft.T,busy:false,n:ft.n};
 }
 // ===== 🫗 ЗСИПАННЯ: неповний ящик → у неповний ящик того ж сорту в тролі, якщо разом влізе =====
 function boxAmt(b){if(!b)return null;var r=String(b.leftRaw==null?'':b.leftRaw).trim();if(r==='')return b.qty||null;var n=parseFloat(r.replace(',','.'));return isNaN(n)?null:n;}
 function pourCand(b){
   if(!b||noTroll(b)||fromCold(b))return null;
-  if(b.state==='in'&&slotOf(b.location))return null;                 // уже в тролі
+  if(b.state==='in'&&trollOf(b.location))return null;                // уже в тролі
   var lb=boxAmt(b);if(!(b.qty>0)||lb==null||lb<=0||lb>=b.qty)return null;  // лише неповний ящик
   var best=null;
   Object.keys(S.boxes).forEach(function(id){var t=S.boxes[id];
-    if(id===b.boxId||t.state!=='in'||!slotOf(t.location)||nk2(t.art)!==nk2(b.art)||!(t.qty>0))return;
+    if(id===b.boxId||t.state!=='in'||!trollOf(t.location)||nk2(t.art)!==nk2(b.art)||!(t.qty>0))return;
     var lt=boxAmt(t);if(lt==null||lt<=0||lt>=t.qty||lt+lb>t.qty)return;   // у тролі неповний, і разом влізе
     if(!best||lt+lb>best.lt+best.lb)best={t:t,lt:lt,lb:lb};});
   return best;
@@ -1309,8 +1319,7 @@ function pourCand(b){
 function pourHtml(b){
   var c=pourCand(b);if(!c||me().role==='viewer')return '';
   var t=c.t,pb=Math.round(c.lb/b.qty*100),pt=Math.round(c.lt/t.qty*100),pa=Math.round((c.lt+c.lb)/t.qty*100),s=slotOf(t.location);
-  var lay=null;try{var LY=(S.cells&&S.cells.length)?effLayout():null;if(LY&&LY.has)lay=LY.byArt[nk2(t.art)];}catch(e){}
-  var where=lay?physLabel(lay):(s?'Троль '+s.row+' · секція '+secOf(s)+' · поличка '+s.shelf+' · місце '+s.slot:'');
+  var where='Троль '+trollOf(t.location)+' ('+(s?'стара адреса '+t.location:t.location)+')';
   var bar=function(p,col){return '<div style="height:10px;border-radius:5px;background:#e9e3f3;overflow:hidden;margin-top:3px"><div style="height:100%;width:'+Math.min(100,p)+'%;background:'+col+'"></div></div>';};
   return '<div style="margin-top:12px;border:3px solid #7b4fc0;border-radius:16px;background:#f7f2fd;padding:14px">'
     +'<div style="font-size:13px;font-weight:800;color:#5a3f8f">🫗 НЕ В ЗАПАС — ЗСИП У ЯЩИК У ТРОЛІ</div>'
@@ -1334,9 +1343,9 @@ async function pourDo(fromId,toId){
 // 🖨 наліпка ячейки прямо з картки скану
 function scanPrintCell(code){code=String(code||'').trim();if(!code)return;S.lbCur={kind:'cell',codes:[code]};lblPrint(1);toast('🖨 Друкую наліпку '+code,'',2200);}
 function twoChoiceHtml(b){
-  var tr=trollTarget(b),np=nearestPallet(b),palTo=np?np.p:(b.prev&&!slotOf(b.prev)?b.prev:''),recT=!!tr&&!tr.busy;
+  var tr=trollTarget(b),np=nearestPallet(b),palTo=np?np.p:(b.prev&&!trollOf(b.prev)?b.prev:''),recT=!!tr;
   var h='<div class="two"><div class="opt'+(recT?' rec':'')+'"><div class="ot">🗄 У ТРОЛЬ</div>'
-    +(tr?'<div class="ob">'+esc(tr.label)+'</div><div class="os">наліпка '+esc(tr.code)+'</div>'+(tr.busy?'<div class="os" style="color:#b42318;font-weight:700">місце в тролі зайняте</div>':'<button class="btn pr ob2" onclick="returnHere(\''+esc(b.boxId)+'\',\''+esc(tr.to)+'\')">✓ Поставив у троль</button>'):'<div class="os">'+(noTroll(b)?'цибулю й часник у тролі не ставимо':(fromCold(b)?'ящик з холодильника — у тролі не ставимо':'для цього сорту нема місця в тролях'))+'</div>')+'</div>'
+    +(tr?'<div class="ob">'+esc(tr.label)+' <span class="mo">('+esc(tr.code)+')</span></div><div class="os">перший троль з місцем · там '+tr.n+' з '+TROLL_CAP+'</div>'+'<button class="btn '+(recT?'pr ':'')+'ob2" onclick="returnHere(\''+esc(b.boxId)+'\',\''+esc(tr.to)+'\')">✓ Поставив у троль '+esc(tr.code)+'</button>':'<div class="os">'+(noTroll(b)?'цибулю й часник у тролі не ставимо':(fromCold(b)?'ящик з холодильника — у тролі не ставимо':'усі тролі заповнені'))+'</div>')+'</div>'
     +'<div class="opt'+(!recT?' rec':'')+'"><div class="ot">🧱 НА ПАЛЕТУ</div>'
     +(palTo?'<div class="ob">Палета '+esc(palTo)+'</div><div class="os">'+(np?'там '+np.n+' з '+PAL_CAP+' ящ.':'')+'</div><button class="btn '+(!recT?'pr':'')+' ob2" onclick="returnHere(\''+esc(b.boxId)+'\',\''+esc(palTo)+'\')">✓ Поставив на палету</button>':'<div class="os">вкажи палету кнопкою «🧱 На палету…»</div>')+'</div></div>';
   return h;
@@ -1348,18 +1357,18 @@ function scanCardHtml(L){
     h='<div class="scan-card"><div class="warn" style="margin:0 0 8px">Відскановано лише <b>артикул '+esc(L.artOnly)+'</b> — без унікального номера ящика. Вибери, який саме ящик у руках:</div>'
       +'<table class="tbl"><thead><tr><th>Ящик</th><th>Сорт</th><th>Де зараз</th><th style="text-align:right">Шт</th><th></th></tr></thead><tbody>'+bxA.map(function(x){var l=boxLeft(x);return '<tr><td class="m">'+esc(x.boxId)+'</td><td>'+esc(x.name||x.art)+'</td><td>'+(x.state==='out'?'🔄 на фасовці':esc(x.location||'—'))+'</td><td style="text-align:right"><b>'+(l==null?x.qty:l)+'</b></td><td><button class="btn sm pr" onclick="scanGo(\''+esc(x.boxId)+'\')">Це він</button></td></tr>';}).join('')+'</tbody></table></div>';}
   else if(L.err)h='<div class="scan-card bad"><div class="scan-big">❗</div><div style="font-size:18px;font-weight:800">'+esc(L.err)+'</div>'+(L.ps&&L.ps.art&&me().role!=='viewer'?'<div class="row" style="justify-content:center"><button class="btn pr" onclick="scanAddNew()">＋ Додати як новий ящик</button></div>':'')+'</div>';
-  else{var b=L.b,w=L.w,l=boxLeft(b),cur=b.state==='out'?('на фасовці'+(b.ts?' з '+fmtT(b.ts):'')+(b.prev?' (взяли з '+b.prev+')':'')):(b.state==='new'?'ще не розміщений':(b.location?(slotOf(b.location)?'у ячейці ':'на палеті ')+b.location:'—'));
+  else{var b=L.b,w=L.w,l=boxLeft(b),cur=b.state==='out'?('на фасовці'+(b.ts?' з '+fmtT(b.ts):'')+(b.prev?' (взяли з '+b.prev+')':'')):(b.state==='new'?'ще не розміщений':(b.location?(normTroll(b.location)?'у тролі ':(slotOf(b.location)?'у тролі '+trollOf(b.location)+', стара адреса ':'на палеті '))+b.location:'—'));
     var sq=L.ps&&L.ps.qty,dq=(l==null?b.qty:l),vw=me().role==='viewer';
     // ячейка в тролі для наліпки: куди ставимо, або де ящик уже стоїть
-    var tr0=b.state==='out'?trollTarget(b):null,cell=tr0?tr0.code:(w.lay?w.lay.code:(slotOf(w.to)?w.to:(slotOf(b.location)?b.location:'')));
-    if(!cell){try{var LYc=(S.cells&&S.cells.length)?effLayout():null,itc=LYc&&LYc.has?LYc.byArt[nk2(b.art)]:null;cell=itc?itc.code:(homeFor(b.art)||'');}catch(e){}}   // ячейка цього сорту в тролі
+    var tr1=b.state==='out'?trollTarget(b):null,Tl=trollOf(w.to)||(tr1?tr1.troll||tr1.code.slice(1):'')||(b.state==='in'?trollOf(b.location):''),cell=Tl?'Т'+Tl:'';   // наліпка: троль, куди ставимо / де стоїть
     // ── ЗВЕРХУ (закріплено): що за ящик + усі кнопки ──
     var acts='';
     if(!vw&&b.state!=='out')acts+='<button class="btn pr sa-main" onclick="scanConfirm()">'+(w.stay?'✓ Гаразд':'✓ Поставив')+'</button>';
     if(!vw&&w.stay&&w.to)acts+='<button class="btn sa-b" style="border-color:#2f6b4e;color:#1f4d38" onclick="scanReturnSame()">↩ Повернув сюди з фасовки</button>';
     if(!vw&&b.state!=='out')acts+='<button class="btn sa-b" onclick="openAdd(\'\');setTimeout(function(){var i=G(\'adI\');if(i){i.value=\''+esc(b.boxId)+'\';lookupBox();}},120)">📍 Інше місце…</button>';
-    if(!vw&&b.state!=='new'&&S.boxes[b.boxId])acts+='<button class="btn sa-b" onclick="scanToPallet()">🧱 На палету…</button>';
-    if(cell)acts+='<button class="btn sa-b" style="border-color:#5a3f8f;color:#4a2f7f" onclick="scanPrintCell(\''+esc(cell)+'\')" title="Надрукувати наліпку з номером ячейки">🖨 Наліпка <span class="mo">'+esc(cell)+'</span></button>';
+    if(!vw&&b.state!=='out'&&w.alt&&w.alt!==w.to)acts+='<button class="btn sa-b" style="border-color:#2f6b4e;color:#1f4d38" onclick="scanTo(\''+esc(w.alt)+'\')" title="Поставити в троль, хоч там цей сорт уже є">🗄 У троль '+esc(w.alt)+'</button>';
+    if(!vw&&b.state!=='out')acts+='<button class="btn sa-b" onclick="scanToPallet()">🧱 На палету…</button>';
+    if(cell)acts+='<button class="btn sa-b" style="border-color:#5a3f8f;color:#4a2f7f" onclick="scanPrintCell(\''+esc(cell)+'\')" title="Надрукувати наліпку троля">🖨 Наліпка <span class="mo">'+esc(cell)+'</span></button>';
     acts+='<button class="btn sa-b" onclick="scanAllOfArt()">📦 Усі ящики сорту</button><button class="btn sa-b" onclick="scanShowCab()">🗄 Показати в тролях</button>'
       +(S.mode!=='scan'?'<button class="btn sa-b sa-x" onclick="S.scanLast=null;closeModal()" title="Закрити (Esc)">✕</button>':'');
     h='<div class="scan-card"><div class="scan-top">'
@@ -1371,7 +1380,7 @@ function scanCardHtml(L){
       // ── нижче: зсипання (якщо можна), куди ставити, карта ──
       +pourHtml(b)
       +(b.state==='out'&&!vw?'<div style="font-size:13px;font-weight:800;color:#1f5fa8;margin-top:10px">🔄 Ящик з фасовки — куди ставимо?</div>'+twoChoiceHtml(b):'<div class="scan-to'+(w.stay?' stay':'')+'"><div style="font-size:13px;font-weight:700;opacity:.8">'+(w.stay?'✓ НІКУДИ НЕ НЕСТИ':'📍 ПОСТАВ СЮДИ')+'</div>'
-      +(w.needPallet?'<input id="scanPal" class="scan-pal" placeholder="№ палети" inputmode="numeric" onkeydown="if(event.key===\'Enter\')scanConfirm()">':(w.lay?'<div class="scan-code" style="font-size:30px">'+esc(physLabel(w.lay))+'</div><div style="font-size:15px;font-weight:700">адреса на наліпці: <span class="mo" style="font-size:18px">'+esc(w.lay.code)+'</span></div>':'<div class="scan-code">'+esc(w.to)+'</div><div style="font-size:15px;font-weight:700">'+esc(placeLabel(w.to))+'</div>'))
+      +(w.needPallet?'<input id="scanPal" class="scan-pal" placeholder="№ палети або Т10" onkeydown="if(event.key===\'Enter\')scanConfirm()">':(w.lay?'<div class="scan-code" style="font-size:30px">'+esc(physLabel(w.lay))+'</div><div style="font-size:15px;font-weight:700">адреса на наліпці: <span class="mo" style="font-size:18px">'+esc(w.lay.code)+'</span></div>':'<div class="scan-code">'+esc(w.to)+'</div><div style="font-size:15px;font-weight:700">'+esc(placeLabel(w.to))+'</div>'))
       +'<div style="font-size:13px;margin-top:4px;opacity:.85">'+esc(w.why)+'</div></div>')
       +(w.to?'<div class="fm-wrap"><div class="fm-title">Де це на складі</div>'+(w.lay?fieldMapLayout(w.lay.phys):(slotOf(w.to)?fieldMap(w.to):palletField(w.to)))+'</div>':'')
       +'</div>';}
@@ -1393,11 +1402,13 @@ function uGo(){
   var boxy=!!id&&(!!S.boxes[id]||/^\d{7,}$/.test(id)||/[\t\n]/.test(v.trim()));
   var artOnly=!!id&&/^\d{4,6}$/.test(id)&&(S.mode==='scan'||S.mode==='check');
   if(boxy||artOnly){scanGo();return;}
+  var ntq=normTroll(v);if(ntq&&(S.mode==='pal'||S.mode==='cab')){inp.value='';S.q='';render();openPallet(ntq);return;}
   S.q=v.replace(/[\t\r\n]+/g,' ').trim();inp.value=S.q;render();
 }
-function scanToPallet(){var L=S.scanLast;if(!L||!L.b)return;var np=nearestPallet(L.b),p=prompt('На яку палету поставити ящик '+L.b.boxId+'?',np?np.p:'');if(!p)return;S.scanLast=null;closeModal();moveBox(L.b.boxId,String(p).trim());}
+function scanToPallet(){var L=S.scanLast;if(!L||!L.b)return;var np=nearestPallet(L.b),p=prompt('На яку палету поставити ящик '+L.b.boxId+'? (або троль: Т10)',np?np.p:'');if(!p)return;p=normPlace(p);if(!p)return;scanTo(p);}
+function scanTo(to){var L=S.scanLast;if(!L||!L.b||!to)return;L.w=Object.assign({},L.w,{to:normPlace(to),stay:false,needPallet:false,lay:null,alt:''});scanConfirm();}
 function scanAllOfArt(){var L=S.scanLast;if(!L||!L.b)return;var b=L.b;modal('<div style="font-size:20px;font-weight:800;margin-bottom:4px">'+catTag(b)+esc(b.name||b.art)+'</div><div class="mo" style="color:var(--mu)">арт. '+esc(b.art)+'</div>'+artPlaces(b.art,L.w&&L.w.to&&slotOf(L.w.to)?L.w.to:'')+'<div class="row"><button class="btn" onclick="renderScan()">← Назад</button><button class="btn" onclick="S.scanLast=null;closeModal()">Закрити</button></div>','wide');}
-function scanShowCab(){var L=S.scanLast;if(!L||!L.b)return;var a=L.b.art;S.scanLast=null;closeModal();S.q=a;setMode('cab');setTimeout(function(){var t=document.querySelector('.cs.hit');if(t)t.scrollIntoView({block:'center',behavior:'smooth'});},250);}
+function scanShowCab(){var L=S.scanLast;if(!L||!L.b)return;var a=L.b.art;S.scanLast=null;closeModal();S.q=a;setMode('cab');setTimeout(function(){var t=document.querySelector('.cs.hit,.mp.hit');if(t)t.scrollIntoView({block:'center',behavior:'smooth'});},250);}
 function scanPageHtml(){return '<div class="wrap" style="max-width:1200px"><div style="text-align:right;font-size:11px;color:var(--mu);margin-top:6px">версія '+esc(APP_BUILD)+'</div><div id="scanRes" style="margin-top:8px"></div></div>';}
 // у режимі скану фокус завжди на полі (сканер «друкує» туди)
 document.addEventListener('keydown',function(e){if(!sess()||document.querySelector('.modal')||S.side||G('lgScr'))return;var a=document.activeElement;if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT'))return;var i=G('q');if(i&&e.key&&e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey){i.focus();}});
@@ -1432,40 +1443,41 @@ function checkPlace(id){var r=(S.noloc||[]).find(function(x){return x[0]===id;})
 // Нічого не змінює сама: записи робляться лише кнопками «Записати сюди» в підсумку.
 S.audit=null;try{S.audit=JSON.parse(localStorage.getItem('auditV1')||'null');}catch(e){}
 function auditSave(){try{localStorage.setItem('auditV1',JSON.stringify(S.audit));}catch(e){}}
-function auditTitle(a){a=a||S.audit;if(!a)return '';var t=a.scope.type;return t==='pal'?'Палета '+a.scope.key:t==='pals'?'Усі палети':t==='cab'?'Троль '+a.scope.key:t==='cabs'?'Усі тролі':'Усе: палети й тролі';}
+function auditTitle(a){a=a||S.audit;if(!a)return '';var t=a.scope.type;return t==='pal'?(normTroll(a.scope.key)?'Троль '+a.scope.key:'Палета '+a.scope.key):t==='pals'?'Усі палети':t==='cab'?'Троль '+a.scope.key:t==='cabs'?'Усі тролі':'Усе: палети й тролі';}
 function openAuditStart(){
   var rows={};Object.keys(cabModel().cabs).forEach(function(k){rows[k.split('-')[0]]=1;});
   var rk=Object.keys(rows).sort(function(a,b){return +a-+b;});
   modal('<div style="font-size:20px;font-weight:800">🔁 Пересканувати запас</div><div style="color:var(--mu);font-size:13px;margin:2px 0 12px">Вибери, що перескановуємо. Скануєш ящики, які є по факту, — програма покаже, чого бракує і що зайве. Сама нічого не змінює.</div>'
     +(S.open?'<button class="btn pr" style="width:100%;height:48px;margin-bottom:8px" onclick="auditStart(\'pal\',\''+esc(S.open)+'\')">🧱 Ця палета — '+esc(S.open)+'</button>':'')
-    +'<div class="row" style="align-items:center"><input id="auP" placeholder="№ палети" inputmode="numeric" style="flex:1;height:46px;border:1.5px solid var(--bo2);border-radius:12px;padding:0 12px;font-size:17px;font-family:var(--mono)" onkeydown="if(event.key===\'Enter\')auditStart(\'pal\',this.value)"><button class="btn" onclick="auditStart(\'pal\',G(\'auP\').value)">🧱 Палету</button></div>'
-    +'<div class="row" style="flex-wrap:wrap">'+rk.map(function(r){return '<button class="btn" onclick="auditStart(\'cab\',\''+r+'\')">🗄 Троль '+r+'</button>';}).join('')+'</div>'
+    +'<div class="row" style="align-items:center"><input id="auP" placeholder="№ палети або Т10" style="flex:1;height:46px;border:1.5px solid var(--bo2);border-radius:12px;padding:0 12px;font-size:17px;font-family:var(--mono)" onkeydown="if(event.key===\'Enter\')auditStart(\'pal\',this.value)"><button class="btn" onclick="auditStart(\'pal\',G(\'auP\').value)">🧱 Палету</button></div>'
+    +'<div class="row" style="flex-wrap:wrap;gap:4px">'+trollRows(build()).map(function(r){return '<button class="btn sm" onclick="auditStart(\'pal\',\'Т'+r+'\')">Т'+r+'</button>';}).join('')+'</div>'
     +'<div class="row" style="flex-wrap:wrap"><button class="btn" onclick="auditStart(\'pals\',\'\')">🧱 Усі палети</button><button class="btn" onclick="auditStart(\'cabs\',\'\')">🗄 Усі тролі</button><button class="btn" onclick="auditStart(\'all\',\'\')">📦 Усе</button></div>'
     +(S.audit?'<div class="warn" style="margin-top:10px">Уже йде пересканування: <b>'+esc(auditTitle())+'</b>. <a href="#" onclick="closeModal();setMode(\'audit\');return false;">Продовжити</a></div>':'')
     +'<div class="row"><button class="btn" onclick="closeModal()">Закрити</button></div>','sm');
 }
-function auditStart(type,key){
+function auditStart(type,key){key=normPlace(key);
   key=String(key||'').trim();if(type==='pal'&&!key){toast('Вкажи № палети','wa');return;}
   if(S.audit&&!confirm('Почати нове пересканування? Незавершене «'+auditTitle()+'» буде скинуто.'))return;
   S.audit={scope:{type:type,key:key},cur:type==='pal'?key:(type==='cab'?'cab:'+key:(type==='cabs'?'cab:*':'')),found:{},extra:{},visited:{},started:Date.now()};
   if(S.audit.cur)S.audit.visited[S.audit.cur]=1;auditSave();closeModal();S.q='';setMode('audit');
 }
-function auditLocLabel(l){return !l?'—':(l.indexOf('cab:')===0?(l==='cab:*'?'усі тролі':'троль '+l.slice(4)):'палета '+l);}
+function auditLocLabel(l){return !l?'—':(l.indexOf('cab:')===0?(l==='cab:*'?'усі тролі':'троль '+l.slice(4)):(normTroll(l)?'троль '+l.slice(1)+' ('+l+')':'палета '+l));}
 function auditExpected(loc){
   var L=[];Object.keys(S.boxes).forEach(function(id){var b=S.boxes[id];if(b.state!=='in')return;
-    if(loc.indexOf('cab:')===0){var s0=slotOf(b.location);if(!s0)return;var r=loc.slice(4);if(r!=='*'&&s0.row!==r)return;L.push(b);}
+    if(loc.indexOf('cab:')===0){var t0=trollOf(b.location);if(!t0)return;var r=loc.slice(4);if(r!=='*'&&t0!==String(+r))return;L.push(b);}
+    else if(normTroll(loc)){if(trollOf(b.location)===loc.slice(1))L.push(b);}
     else if(String(b.location)===loc)L.push(b);});
   return L;
 }
-function auditIsLoc(v){v=String(v||'').trim();if(!v)return false;if(slotOf(v))return false;if(S.boxes[v])return false;if(/^\d{1,4}$/.test(v))return true;return !!(S.locs&&S.locs[v]);}
+function auditIsLoc(v){v=String(v||'').trim();if(!v)return false;if(normTroll(v))return true;if(slotOf(v))return false;if(S.boxes[v])return false;if(/^\d{1,4}$/.test(v))return true;return !!(S.locs&&S.locs[v]);}
 function auditScan(raw){
   var A=S.audit;if(!A)return;var ps=parseScan(raw),id=ps.id;if(!id)return;
   var t=A.scope.type;
-  if((t==='pals'||t==='all')&&auditIsLoc(id)){A.cur=id;A.visited[id]=1;auditSave();toast('🧱 Перескановуємо палету '+id,'',1500);render();return;}
+  if((t==='pals'||t==='all'||t==='cabs')&&auditIsLoc(id)){id=normPlace(id);A.cur=id;A.visited[id]=1;auditSave();toast((normTroll(id)?'🗄 Перескановуємо троль ':'🧱 Перескановуємо палету ')+id,'',1500);render();return;}
   if(t==='all'&&/^(тролі|троль|cab)$/i.test(id)){A.cur='cab:*';A.visited['cab:*']=1;auditSave();render();return;}
   if(!A.cur){toast('Спершу відскануй або введи № палети','wa',2500);return;}
   var b=S.boxes[id],loc=A.cur,ok=false;
-  if(b&&b.state==='in'){if(loc.indexOf('cab:')===0){var s0=slotOf(b.location),r=loc.slice(4);ok=!!s0&&(r==='*'||s0.row===r);}else ok=String(b.location)===loc;}
+  if(b&&b.state==='in'){if(loc.indexOf('cab:')===0){var t0=trollOf(b.location),r=loc.slice(4);ok=!!t0&&(r==='*'||t0===String(+r));}else if(normTroll(loc))ok=trollOf(b.location)===loc.slice(1);else ok=String(b.location)===loc;}
   delete A.extra[id];delete A.found[id];
   if(ok){A.found[id]=loc;try{navigator.vibrate&&navigator.vibrate(40);}catch(e){}}
   else{A.extra[id]={loc:loc,art:b?b.art:(ps.art||''),name:b?(b.name||''):'',was:b?(b.state==='out'?'на фасовці'+(b.prev?' (брали з '+b.prev+')':''):(b.location?'записаний: '+b.location:'без місця')):'нема в запасі / у «Прийом»'};try{navigator.vibrate&&navigator.vibrate([60,50,60]);}catch(e){}}
@@ -1504,7 +1516,7 @@ function auditSummary(){
   h+='<div class="row noprint">'+(u.role!=='viewer'&&can.length?'<button class="btn pr" onclick="auditApply('+esc(JSON.stringify(can)).replace(/"/g,'&quot;')+')">✓ Записати всі зайві на знайдене місце ('+can.length+')</button>':'')+'<button class="btn" onclick="window.print()">🖨 Друк</button><button class="btn" onclick="if(confirm(\'Закінчити пересканування?\')){S.audit=null;auditSave();closeModal();setMode(\'pal\');}">Закінчити</button><button class="btn" onclick="closeModal()">← Продовжити сканувати</button></div>';
   modal(h,'wide');
 }
-function auditTarget(id){var A=S.audit,e=A&&A.extra[id],b=S.boxes[id];if(!e||!b)return '';if(e.loc.indexOf('cab:')!==0)return e.loc;var w=whereTo(b);return w&&w.to&&slotOf(w.to)?w.to:'';}
+function auditTarget(id){var A=S.audit,e=A&&A.extra[id],b=S.boxes[id];if(!e||!b)return '';if(e.loc.indexOf('cab:')!==0)return e.loc;var ft=trollEligible(b)?freeTroll(id):null;return ft?'Т'+ft.T:'';}
 async function auditApply(ids){
   if(!ids||!ids.length)return;if(ids.length>1&&!confirm('Записати '+ids.length+' ящ. на місце, де їх знайдено? У «Фасовку» допишуться рядки ЗАБРАЛИ/ВЕРНУЛИ.'))return;
   var ok=0,bad=0;
@@ -1568,10 +1580,10 @@ function drawPallet(){
   var P=palletByName(S.open),q=String(S.q||'').trim().toLowerCase(),u=me(),o=G('ov');
   if(!o){o=document.createElement('div');o.id='ov';o.className='ov';o.onclick=function(e){if(e.target===o)closePallet();};document.body.appendChild(o);}
   var L=Math.ceil(P.slots.length/PER_LAYER),gaps=P.slots.filter(function(x){return !x;}).length;
-  o.innerHTML='<div class="dr"><div class="dh"><span class="pn">'+(P.kind==='pal'?'Палета ':'')+esc(P.p)+'</span><span class="meta">'+P.n+' ящ. · '+L+' шар.'+(gaps?' · <span style="color:#b26b00">'+gaps+' вільн.</span>':'')+'</span>'
+  o.innerHTML='<div class="dr"><div class="dh"><span class="pn">'+(P.kind==='pal'?'Палета ':(P.kind==='troll'?'🗄 Троль ':''))+esc(P.p)+(P.kind==='troll'?' <small style="font-size:13px;color:var(--mu)">'+P.n+' з '+TROLL_CAP+(P.sec?' · проліт '+esc(P.sec):'')+'</small>':'')+'</span><span class="meta">'+P.n+' ящ. · '+L+' шар.'+(gaps?' · <span style="color:#b26b00">'+gaps+' вільн.</span>':'')+'</span>'
     +(u.role!=='viewer'?'<button class="btn pr noprint" onclick="openAdd(\''+esc(P.p)+'\')">＋ Ящик</button>':'')
     +'<button class="btn noprint" onclick="window.print()" title="Друк схеми">🖨</button><button class="btn noprint" onclick="closePallet()">✕</button></div>'
-    +'<div class="db">'+palletHtml(P,q)+legend(P)+boxTable(P)+'</div></div>';
+    +'<div class="db">'+(P.kind==='troll'?'<div class="found" style="margin:0 0 10px">🗄 Троль = проліт на '+TROLL_CAP+' ящ. (6 поличок по 3): став ящик у будь-яке вільне місце, у програмі місце — <b class="mo">'+esc(P.p)+'</b>. Вільно: <b>'+Math.max(0,TROLL_CAP-P.n)+'</b>.'+(P.old?' <span style="color:var(--mu)">'+P.old+' ящ. ще записані старими адресами ячейок цього прольоту — вони теж тут.</span>':'')+'</div>':'')+palletHtml(P,q)+legend(P)+boxTable(P)+'</div></div>';
 }
 function findBox(id){var all=build();for(var i=0;i<all.length;i++)if(all[i].on[id])return {P:all[i],x:all[i].on[id]};return null;}
 function closeModal(){var m=document.querySelector('.modal');if(m)m.remove();}
@@ -1609,7 +1621,7 @@ function lblBoxHTML(r){
 function lblCellHTML(code){
   var w=LBC.w,h=LBC.h,bcH=LBC.cellBc?Math.min(10,h*0.28):0,fs=Math.min((h-bcH-4)*0.8,(w-4)/(code.length*0.52));
   return '<div class="lbl lbl-cell" style="width:'+w+'mm;height:'+h+'mm"><div class="l-cell" style="font-size:'+fs.toFixed(2)+'mm">'+esc(code)+'</div>'
-    +(LBC.cellBc?'<div class="l-bc" style="margin-top:1mm">'+barcodeSVG(code,w-6,bcH)+'</div>':'')+'</div>';
+    +(LBC.cellBc?'<div class="l-bc" style="margin-top:1mm">'+barcodeSVG(String(code).replace(/^Т/,'T'),w-6,bcH)+'</div>':'')+'</div>';
 }
 function lblRowFrom(row){   // рядок «Прийом на Склад»: A арт · B штрихкод · C к-сть · D назва · E розмір · F постач. · I дата · J статус
   var dt=String(row[8]||'').trim(),m=dt.match(/(\d{1,2}\.\d{1,2}\.\d{4})\D*(\d{1,2}:\d{2})?/);
@@ -1625,13 +1637,15 @@ function lblCodes(key){
   var M=cabModel();Object.keys(M.cabs).sort(function(a,b){return a.localeCompare(b,'uk',{numeric:true});}).forEach(function(k){var C=M.cabs[k];if(row?C.row!==row:k!==sec)return;cabSlotsList(C).forEach(function(x){if(x.sl.art&&out.indexOf(x.sl.code)<0)out.push(x.sl.code);});});
   return out;
 }
-function lblCellOfArt(art){var LY=(S.layout&&S.layout.has)?S.layout:null;if(LY&&LY.has){var it=LY.byArt[nk2(art)];if(it)return it.code;}return homeFor(art);}
+function lblCellOfArt(art){var A=nk2(art),Tq='';Object.keys(S.boxes).forEach(function(id){var x=S.boxes[id];if(!Tq&&x.state==='in'&&nk2(x.art)===A)Tq=trollOf(x.location);});if(Tq)return 'Т'+Tq;var LY=(S.layout&&S.layout.has)?S.layout:null;if(LY&&LY.has){var it=LY.byArt[nk2(art)];if(it)return it.code;}return homeFor(art);}
 async function labelGo(v){
   var raw=String(v||'').trim();if(!raw)return;var ps=parseScan(raw),id=ps.id;
   if(S.lbKind==='cell'){
     var one=raw.replace(/\s+/g,''),codes=[];
-    if(slotOf(one))codes=[one];
+    if(normTroll(raw)||/^\d{1,3}$/.test(one))codes=[normTroll(raw)||'Т'+(+one)];
+    else if(slotOf(one))codes=[one];
     else if(/^\d+-\d+$/.test(one)||(/^\d{1,3}$/.test(one)&&lblCodes(one).length))codes=lblCodes(one);
+    else if(S.boxes[id]&&S.boxes[id].state==='in'&&trollOf(S.boxes[id].location))codes=['Т'+trollOf(S.boxes[id].location)];
     else{var b=S.boxes[id];if(!b){var r0=await api('boxLookup',{boxId:id});if(r0&&r0.ok&&r0.found)b={art:String(r0.row[0]||'').trim(),name:String(r0.row[3]||'')};}
       if(!b&&/^\d{4,8}$/.test(id))b={art:id,name:''};
       var c=b?lblCellOfArt(b.art):'';if(c)codes=[c];else{lblSay('Для «'+raw+'» нема ячейки в тролях','err');return;}}
@@ -1734,52 +1748,44 @@ function lblSaveCfg(){
   try{localStorage.setItem('pl_label_cfg',JSON.stringify(LBC));}catch(e){}closeModal();renderLabelPage();var i=G('q');if(i)i.focus();
 }
 // ===== 📋 СПИСОК ВІДБОРУ В ТРОЛІ: які ящики з палет можна поставити в тролі — арт · назва · розміщення · ячейка =====
-S.pkSort=localStorage.getItem('pl_pk_sort')||'from';S.pkRow=localStorage.getItem('pl_pk_row')||'';S.pkBorrow=localStorage.getItem('pl_pk_borrow')!=='0';
+S.cabCells=localStorage.getItem('cabCells')==='1';S.pkSort=localStorage.getItem('pl_pk_sort')||'from';S.pkRow=localStorage.getItem('pl_pk_row')||'';S.pkBorrow=localStorage.getItem('pl_pk_borrow')!=='0';
 function pickList(){
-  var LY=(S.cells&&S.cells.length)?effLayout():null,occ=cellOcc(),RES0=reserveByArt(),RES={},used={},out=[];
-  Object.keys(RES0).forEach(function(a){RES[a]=RES0[a].slice();});
-  var take=function(a,noCold){var r=RES[a]||[];for(var i=0;i<r.length;i++){if(used[r[i].id]||(noCold&&isCold(r[i].p)))continue;used[r[i].id]=1;return r.splice(i,1)[0];}return null;};
-  if(LY&&LY.has&&!S.viewFile){
-    var list=LY.list.slice().sort(function(a,b){return a.cab.localeCompare(b.cab,'uk',{numeric:true})||a.shelf-b.shelf||a.place-b.place;});
-    // 1) свій сорт: ячейка порожня, а в запасі він є
-    list.forEach(function(it,ix){var st=layState(it,occ,RES0);if(st.s!=='todo')return;var b=take(nk2(it.art));if(b)out.push({kind:'own',box:b.id,art:b.b.art,name:b.b.name,from:b.p,to:it.code,place:physLabel(it),ord:ix});});
-    // 2) сорт закінчився — у порожню ячейку зайвий ящик сусіднього сорту
-    if(S.pkBorrow)list.forEach(function(it,ix){var st=layState(it,occ,RES0);if(st.s!=='none')return;
-      var C=borrowCands(it);for(var k=0;k<C.length;k++){var b=take(nk2(C[k].it.art),true);if(b){out.push({kind:'borrow',box:b.id,art:b.b.art,name:b.b.name,from:b.p,to:it.code,place:physLabel(it),ord:ix,instead:it.name||it.art});break;}}});
-  }else{
-    cabTodo().forEach(function(x,ix){if(used[x.from.id])return;used[x.from.id]=1;out.push({kind:'own',box:x.from.id,art:x.art,name:x.name||x.from.b.name,from:x.from.p,to:x.code,place:placeLabel(x.code),ord:ix});});
-  }
+  var RES=reserveByArt(),all=[],out=[],fill=trollFill(''),N=trollTotal(),T=1;
+  Object.keys(RES).forEach(function(a){RES[a].forEach(function(x){if(!isCold(x.p)&&!noTroll(x.b))all.push(x);});});
   var num=function(p){var n=parseInt(p,10);return isNaN(n)?1e9:n;};
-  out.sort(S.pkSort==='to'?function(a,b){return a.ord-b.ord;}:function(a,b){return num(a.from)-num(b.from)||String(a.from).localeCompare(String(b.from))||a.ord-b.ord;});
+  all.sort(function(a,b){return num(a.p)-num(b.p)||String(a.p).localeCompare(String(b.p))||dateKey(a.b.date).localeCompare(dateKey(b.b.date));});
+  all.forEach(function(x){while(T<=N&&(fill[String(T)]||0)>=TROLL_CAP)T++;if(T>N)return;fill[String(T)]=(fill[String(T)]||0)+1;
+    out.push({kind:'own',box:x.id,art:x.b.art,name:x.b.name,from:x.p,to:'Т'+T,place:'Троль '+T+' — у будь-яке вільне місце',ord:T});});
+  if(S.pkSort==='to')out.sort(function(a,b){return a.ord-b.ord||num(a.from)-num(b.from);});
   return out;
 }
-function pkRowOf(x){var s=slotOf(x.to);return s?s.row:'';}
+function pkRowOf(x){return trollOf(x.to);}
 function pickFiltered(){var all=pickList();return S.pkRow?all.filter(function(x){return pkRowOf(x)===S.pkRow;}):all;}
 function pkSetRow(r){S.pkRow=r;try{localStorage.setItem('pl_pk_row',r);}catch(e){}openPickList();}
 function openPickList(){
   var ALL=pickList(),cnt={};ALL.forEach(function(x){var r=pkRowOf(x);cnt[r]=(cnt[r]||0)+1;});
-  var rowsAll={};Object.keys(cabModel().cabs).forEach(function(k){rowsAll[k.split('-')[0]]=1;});Object.keys(cnt).forEach(function(r){if(r)rowsAll[r]=1;});
+  var rowsAll={};trollRows(build()).forEach(function(r){rowsAll[r]=1;});Object.keys(cnt).forEach(function(r){if(r)rowsAll[r]=1;});
   var rk=Object.keys(rowsAll).sort(function(a,b){return +a-+b;});if(S.pkRow&&!rowsAll[S.pkRow])S.pkRow='';
   var L=S.pkRow?ALL.filter(function(x){return pkRowOf(x)===S.pkRow;}):ALL,u=me(),pals={};L.forEach(function(x){pals[x.from]=1;});var nb=L.filter(function(x){return x.kind==='borrow';}).length;
   var h='<div style="font-size:20px;font-weight:800">📋 Список відбору '+(S.pkRow?'в троль '+esc(S.pkRow):'в тролі')+' — '+L.length+' ящ.</div>'
-    +'<div style="color:var(--mu);font-size:13px;margin:2px 0 8px">Ящики, які зараз лежать на палетах і мають місце в тролях. Бери найстаріший ящик сорту з указаної палети й став у ячейку. ✓ — поставив (запишеться у «Фасовку»).</div>'
+    +'<div style="color:var(--mu);font-size:13px;margin:2px 0 8px">Ящики з палет, які влазять у вільні місця тролів (по порядку Т1, Т2, …, по 18 ящ.). Бери ящик з указаної палети й став у вказаний троль — у будь-яке вільне місце. ✓ — поставив (запишеться у «Фасовку»).</div>'
     +'<div class="noprint" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px"><span style="font-size:13px;font-weight:700;color:var(--mu)">Троль:</span>'
     +'<button type="button" class="gc'+(!S.pkRow?' on':'')+'" style="'+(!S.pkRow?'border-color:#2f6b4e;background:#e3f1e8':'')+'" onclick="pkSetRow(\'\')">Усі<span>'+ALL.length+'</span></button>'
     +rk.map(function(r){var on=S.pkRow===r;return '<button type="button" class="gc'+(on?' on':'')+'" style="'+(on?'border-color:#2f6b4e;background:#e3f1e8':'')+'" onclick="pkSetRow(\''+r+'\')">'+esc(r)+'<span>'+(cnt[r]||0)+'</span></button>';}).join('')+'</div>'
     +'<div class="noprint" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px">'
-    +'<div class="seg2"><button class="'+(S.pkSort==='from'?'on':'')+'" onclick="S.pkSort=\'from\';try{localStorage.setItem(\'pl_pk_sort\',\'from\');}catch(e){}openPickList()">🧱 За палетами</button><button class="'+(S.pkSort==='to'?'on':'')+'" onclick="S.pkSort=\'to\';try{localStorage.setItem(\'pl_pk_sort\',\'to\');}catch(e){}openPickList()">🗄 За ячейками</button></div>'
-    +'<label class="tg"><input type="checkbox" '+(S.pkBorrow?'checked':'')+' onchange="S.pkBorrow=this.checked;try{localStorage.setItem(\'pl_pk_borrow\',this.checked?\'1\':\'0\');}catch(e){}openPickList()"> + у порожні ячейки — сусідній сорт'+(nb?' ('+nb+')':'')+'</label></div>'
+    +'<div class="seg2"><button class="'+(S.pkSort==='from'?'on':'')+'" onclick="S.pkSort=\'from\';try{localStorage.setItem(\'pl_pk_sort\',\'from\');}catch(e){}openPickList()">🧱 За палетами</button><button class="'+(S.pkSort==='to'?'on':'')+'" onclick="S.pkSort=\'to\';try{localStorage.setItem(\'pl_pk_sort\',\'to\');}catch(e){}openPickList()">🗄 За тролями</button></div>'
+    +'</div>'
     +'<div style="font-size:13px;color:var(--mu);margin-bottom:4px">Палет обійти: <b>'+Object.keys(pals).length+'</b>'+(Object.keys(pals).length?' — '+Object.keys(pals).sort(function(a,b){return (parseInt(a,10)||0)-(parseInt(b,10)||0);}).map(esc).join(', '):'')+'</div>';
   if(!L.length)h+='<div class="found">'+(S.pkRow?'У троль '+esc(S.pkRow)+' ставити нічого — усе вже на місці ✓':'Усе, що можна, уже стоїть у тролях ✓')+'</div>';
-  else h+='<div style="overflow-x:auto"><table class="tbl pk"><thead><tr><th>№</th><th>Арт</th><th>Назва</th><th>Розміщення</th><th>Поставити в ячейку</th><th class="noprint"></th></tr></thead><tbody>'
+  else h+='<div style="overflow-x:auto"><table class="tbl pk"><thead><tr><th>№</th><th>Арт</th><th>Назва</th><th>Розміщення</th><th>Поставити в троль</th><th class="noprint"></th></tr></thead><tbody>'
     +L.map(function(x,i){return '<tr'+(x.kind==='borrow'?' style="background:#fff8ec"':'')+'><td>'+(i+1)+'</td><td class="m"><b>'+esc(x.art)+'</b></td><td>'+catTag({name:x.name,art:x.art})+esc(x.name||'')+'<br><span class="mo" style="color:var(--mu);font-size:11.5px">ящик '+esc(x.box)+'</span></td>'
-      +'<td><b style="font-size:16px">'+(slotOf(x.from)?'🗄 ':'🧱 ')+esc(x.from)+'</b>'+(isCold(x.from)?' ❄':'')+'</td>'
+      +'<td><b style="font-size:16px">'+(trollOf(x.from)?'🗄 ':'🧱 ')+esc(x.from)+'</b>'+(isCold(x.from)?' ❄':'')+'</td>'
       +'<td><b class="mo" style="font-size:16px">'+esc(x.to)+'</b><br><span style="font-size:11.5px;color:var(--mu)">'+esc(x.place)+'</span>'+(x.kind==='borrow'?'<br><span style="font-size:11.5px;color:#a06a00">↪ замість '+esc(x.instead)+' (закінчився)</span>':'')+'</td>'
       +'<td class="noprint">'+(u.role!=='viewer'?'<button class="btn sm pr" onclick="moveBox(\''+esc(x.box)+'\',\''+esc(x.to)+'\').then(openPickList)" title="Поставив — записати">✓</button>':'')+'</td></tr>';}).join('')+'</tbody></table></div>';
   h+='<div class="row noprint">'+(L.length?'<button class="btn" onclick="window.print()">🖨 Друк</button><button class="btn" onclick="pickCopy()">📋 Скопіювати для таблиці</button>'+(u.role!=='viewer'?'<button class="btn" onclick="pickAll()">✓ Усе поставив ('+L.length+')</button>':''):'')+'<button class="btn" onclick="closeModal()">Закрити</button></div>';
   modal(h,'wide');
 }
-function pickCopy(){var L=pickFiltered(),t='Арт\tНазва\tЯщик\tРозміщення\tЯчейка\tМісце в тролі\n'+L.map(function(x){return [x.art,x.name,x.box,x.from,x.to,x.place+(x.kind==='borrow'?' (сусідній сорт)':'')].join('\t');}).join('\n');
+function pickCopy(){var L=pickFiltered(),t='Арт\tНазва\tЯщик\tРозміщення\tТроль\tПримітка\n'+L.map(function(x){return [x.art,x.name,x.box,x.from,x.to,x.place+(x.kind==='borrow'?' (сусідній сорт)':'')].join('\t');}).join('\n');
   try{navigator.clipboard.writeText(t).then(function(){toast('Скопійовано '+L.length+' рядків — встав у таблицю','',2200);});}catch(e){toast('Не вдалося скопіювати','er');}}
 function pickAll(){var L=pickFiltered();if(!L.length)return;if(!confirm('Записати, що всі '+L.length+' ящ. поставлено в тролі? Натискай, лише коли фізично все поставив.'))return;
   closeModal();moveMany(L.map(function(x){return [x.box,x.to];})).then(function(){toast('✓ Записано '+L.length+' ящ.','',2500);openPickList();});}
@@ -1886,8 +1892,8 @@ var ADD={p:'',id:'',found:null,from:''};
 function openAdd(p){
   ADD={p:p||ADD.p||'',id:'',found:null,from:''};
   var pals=build().filter(function(P){return P.kind==='pal';}).map(function(P){return P.p;});
-  modal('<div style="font-size:20px;font-weight:800">＋ Розмістити ящик</div><div style="color:var(--mu);font-size:13px;margin-top:2px">Скануй ящик або впиши ID і натисни Enter. Якщо в сорту є своя ячейка в тролі і вона порожня — програма запропонує її, інакше — палету. Можна сканувати підряд.</div>'
-    +'<label class="fld"><span>Палета для запасу</span><input id="adP" list="adPL" value="'+esc(slotOf(ADD.p)?'':ADD.p)+'" placeholder="наприклад 50"></label><datalist id="adPL">'+pals.map(function(p){return '<option value="'+esc(p)+'">';}).join('')+'</datalist>'
+  modal('<div style="font-size:20px;font-weight:800">＋ Розмістити ящик</div><div style="color:var(--mu);font-size:13px;margin-top:2px">Скануй ящик або впиши ID і натисни Enter. Програма запропонує перший по порядку троль, де є вільне місце (Т1, Т2, …). Можна сканувати підряд.</div>'
+    +'<label class="fld"><span>Палета або троль</span><input id="adP" list="adPL" value="'+esc(slotOf(ADD.p)?'':ADD.p)+'" placeholder="наприклад 50 або Т10"></label><datalist id="adPL">'+pals.map(function(p){return '<option value="'+esc(p)+'">';}).join('')+'</datalist>'
     +'<label class="fld"><span>ID ящика</span><input id="adI" class="scan" autocomplete="off" placeholder="70071861" onkeydown="scanKey(event,this,lookupBox)" oninput="scanInput(this,lookupBox)"></label>'
     +'<div id="adR"></div><div class="row"><button class="btn" onclick="lookupBox()">🔍 Знайти</button><button class="btn" onclick="closeModal()">Готово</button></div>','sm');
   if(slotOf(ADD.p))ADD.cell=ADD.p;else ADD.cell='';
@@ -1922,27 +1928,31 @@ async function lookupBox(){
 }
 // куди класти: якщо в сорту є своя ячейка і вона порожня — туди; інакше — у запас на палету
 function placeChoice(art,id,verb){
-  var hf=homeFree(art,id),p=String((G('adP')||{}).value||'').trim(),h='<div class="choice">';
-  var nmA=(S.boxes[id]&&S.boxes[id].name)||(ADD.found&&ADD.found.name)||String((G('adN')||{}).value||'');if(noTroll({name:nmA})||fromCold(S.boxes[id]))hf={home:'',busy:null};
-  if(!p){var np0=nearestPallet(S.boxes[id]||{boxId:id,art:art,name:'',state:'in',location:''});if(np0){p=np0.p;var pi0=G('adP');if(pi0)pi0.value=p;}}
-  if(ADD.cell){   // відкрили «Покласти ящик сюди» з конкретної ячейки
-    var other=hf.home&&slotKeyOf(hf.home)!==slotKeyOf(ADD.cell);
-    h+='<button class="btn pr" id="adGo" onclick="commitAdd(\''+esc(ADD.cell)+'\')">🗄 У ячейку '+esc(ADD.cell)+'</button>'+(other?'<div class="warn" style="margin:0">У цього сорту своя ячейка — '+esc(hf.home)+'.</div>':'');
+  var p=normPlace((G('adP')||{}).value||''),h='<div class="choice">';
+  var nmA=(S.boxes[id]&&S.boxes[id].name)||(ADD.found&&ADD.found.name)||String((G('adN')||{}).value||'');
+  var bb=Object.assign({boxId:id,state:'new',location:'',prev:''},S.boxes[id]||{},{art:art,name:nmA});
+  var ft=trollEligible(bb)?freeTroll(id):null,tt=ft?'Т'+ft.T:'';
+  if(ADD.cell){   // відкрили «Покласти ящик сюди» з конкретної ячейки (старий вигляд)
+    h+='<button class="btn pr" id="adGo" onclick="commitAdd(\''+esc(ADD.cell)+'\')">🗄 У ячейку '+esc(ADD.cell)+'</button>';
     h+='<button class="btn" onclick="commitAdd(\'@pal\')">🧱 '+esc(verb)+' на палету'+(p?' '+esc(p):'…')+'</button>';
     setTimeout(function(){var g=G('adGo');if(g)g.focus();},30);return h+'</div>';
   }
-  if(hf.home&&!hf.busy){h+='<button class="btn pr" id="adGo" onclick="commitAdd(\''+esc(hf.home)+'\')">🗄 У троль '+esc(hf.home)+'</button>';
-    h+='<button class="btn" onclick="commitAdd(\'@pal\')">🧱 '+esc(verb)+' на палету'+(p?' '+esc(p):'…')+'</button><div style="font-size:12.5px;color:var(--mu)">Ячейка '+esc(hf.home)+' цього сорту порожня — перший ящик іде туди, решта — у запас на палети.</div>';}
-  else{var fnb='';   // адреса лише з файлу — у чужі ячейки автоматично не кладемо
-    if(hf.home)h+='<div class="found" style="margin:0">🗄 У ячейці '+esc(hf.home)+' вже є ящик '+esc(hf.busy.id)+(fnb?' — поруч є вільна '+esc(fnb)+'.':' — цей у запас на палету.')+'</div>';
-    if(fnb)h+='<button class="btn pr" id="adGo" onclick="commitAdd(\''+esc(fnb)+'\')">🗄 Поруч у вільну ячейку '+esc(fnb)+'</button><button class="btn" onclick="commitAdd(\'@pal\')">🧱 '+esc(verb)+' на палету'+(p?' '+esc(p):'…')+'</button>';
-    else h+='<button class="btn pr" id="adGo" onclick="commitAdd(\'@pal\')">🧱 '+esc(verb)+' на палету'+(p?' '+esc(p):'…')+'</button>';}
+  if(p&&normTroll(p)){   // відкрили з картки троля — кладемо саме туди
+    var fn=trollFill(id)[p.slice(1)]||0;
+    h+='<button class="btn pr" id="adGo" onclick="commitAdd(\'@pal\')">🗄 '+esc(verb)+' в троль '+esc(p)+'</button>'+(fn>=TROLL_CAP?'<div class="warn" style="margin:0">У '+esc(p)+' уже '+fn+' з '+TROLL_CAP+' ящ.</div>':'');
+    setTimeout(function(){var g=G('adGo');if(g)g.focus();},30);return h+'</div>';
+  }
+  if(!p&&!tt){var np0=nearestPallet(bb);if(np0){p=np0.p;var pi0=G('adP');if(pi0)pi0.value=p;}}
+  if(tt){h+='<button class="btn pr" id="adGo" onclick="commitAdd(\''+esc(tt)+'\')">🗄 У троль '+esc(tt)+' — у будь-яке вільне місце</button>'
+    +'<button class="btn" onclick="commitAdd(\'@pal\')">🧱 '+esc(verb)+' на палету'+(p?' '+esc(p):'…')+'</button><div style="font-size:12.5px;color:var(--mu)">'+esc(tt)+' — перший троль по порядку, де є місце (там '+ft.n+' з '+TROLL_CAP+').</div>';}
+  else{if(trollEligible(bb))h+='<div class="found" style="margin:0">Усі тролі заповнені — на палету.</div>';
+    h+='<button class="btn pr" id="adGo" onclick="commitAdd(\'@pal\')">🧱 '+esc(verb)+' на палету'+(p?' '+esc(p):'…')+'</button>';}
   setTimeout(function(){var g=G('adGo');if(g)g.focus();},30);
   return h+'</div>';
 }
 async function commitAdd(target){
-  if(!target||target==='@pal'){var pv=String((G('adP')||{}).value||'').trim();if(!pv){toast('Вкажи номер палети','wa');var pi=G('adP');if(pi)pi.focus();return;}ADD.p=pv;}
-  else ADD.p=target;
+  if(!target||target==='@pal'){var pv=normPlace((G('adP')||{}).value||'');if(!pv){toast('Вкажи номер палети','wa');var pi=G('adP');if(pi)pi.focus();return;}ADD.p=pv;}
+  else ADD.p=normPlace(target);
   var b=ADD.found,art=b?b.art:String((G('adA')||{}).value||'').trim(),name=b?b.name:String((G('adN')||{}).value||'').trim(),qty=b?(boxLeft(b)==null?b.qty:boxLeft(b)):String((G('adQ')||{}).value||'').trim();
   if(!b&&!art){toast('Вкажи артикул','wa');return;}
   var r=await api('palletBox',{op:'add',pallet:ADD.p,boxId:ADD.id,from:ADD.from,art:art,name:name,qty:qty,g0:((S.boxes[ADD.id]||{}).g||''),st:((S.boxes[ADD.id]||{}).state||'')});
@@ -1951,15 +1961,15 @@ async function commitAdd(target){
   if(r.slots){if(r.slots.to)S.slots[ADD.p]=r.slots.to;if(ADD.from&&r.slots.from)S.slots[ADD.from]=r.slots.from;}
   S.fresh[ADD.id]=1;try{navigator.vibrate&&navigator.vibrate(60);}catch(e){}
   if(S.boxes[ADD.id]){S.boxes[ADD.id].location=ADD.p;S.boxes[ADD.id].state='in';}else S.boxes[ADD.id]=liveBoxObj([ADD.id,art,name,qty,'', 'in',ADD.p,'',Date.now(),'','',0]);liveSoon();
-  toast((r.act==='переміщено'?'↔ Переміщено на ':'✓ Покладено на ')+(slotOf(ADD.p)?'':'палету ')+ADD.p+fasNote(r),r&&r.fas&&!/^ok|^те саме/.test(r.fas)?'wa':'',3000);
+  toast((r.act==='переміщено'?'↔ Переміщено на ':'✓ Покладено на ')+(trollOf(ADD.p)?'троль ':'палету ')+ADD.p+fasNote(r),r&&r.fas&&!/^ok|^те саме/.test(r.fas)?'wa':'',3000);
   var keepP=(target&&target!=='@pal')?String((G('adP')||{}).value||'').trim():ADD.p;render();openAdd(keepP);   // одразу готові до наступного скану
 }
 async function moveBox(id,toCell){
-  var f=findBox(id)||findAny(id);if(!f)return;var to=toCell||prompt('Куди перемістити ящик '+id+'? (палета або ячейка)','');if(!to)return;to=to.trim();if(!to||to===f.P.p)return;
+  var f=findBox(id)||findAny(id);if(!f)return;var to=toCell||prompt('Куди перемістити ящик '+id+'? (палета або троль: Т10)','');if(!to)return;to=normPlace(to);if(!to||to===f.P.p)return;
   var b=f.x.b,r=await api('palletBox',{op:'add',pallet:to,boxId:id,from:f.P.p,art:b.art,name:b.name,qty:boxLeft(b)==null?b.qty:boxLeft(b),g0:((S.boxes[id]||{}).g||''),st:((S.boxes[id]||{}).state||'')});
   if(!r||!r.ok){toast('Не вдалося: '+((r&&(r.error||r.msg))||'сервер не відповів — спробуй ще раз'),'er');return;}
   S.manual.push([r.at,to,id,b.art,b.name,'',me().name||'',r.act,f.P.p]);if(r.slots){if(r.slots.to)S.slots[to]=r.slots.to;if(r.slots.from)S.slots[f.P.p]=r.slots.from;}
-  S.fresh[id]=1;if(S.boxes[id]){S.boxes[id].location=to;S.boxes[id].state='in';}closeModal();toast((slotOf(to)?'🗄 Покладено в троль '+to:'↔ Переміщено на палету '+to)+fasNote(r),r&&r.fas&&!/^ok|^те саме/.test(r.fas)?'wa':'',4000);render();liveSoon();
+  S.fresh[id]=1;if(S.boxes[id]){S.boxes[id].location=to;S.boxes[id].state='in';}closeModal();toast((trollOf(to)?'🗄 Покладено в троль '+to:'↔ Переміщено на палету '+to)+fasNote(r),r&&r.fas&&!/^ok|^те саме/.test(r.fas)?'wa':'',4000);render();liveSoon();
 }
 function findAny(id){var x=placements()[id];return x?{P:{p:x.p},x:x}:null;}
 async function removeBox(id){
