@@ -582,6 +582,11 @@ function groups(all){
 }
 function topVariety(P){var c={},best='',bn=0;P.slots.forEach(function(id){var x=id&&P.on[id];if(!x)return;var k=x.b.name||x.b.art;c[k]=(c[k]||0)+1;if(c[k]>bn){bn=c[k];best=k;}});var kinds=Object.keys(c).length;return best?(best+(kinds>1?' +'+(kinds-1):'')):'';}
 function mini(P,q){
+  if(P.kind==='troll'){var G1=trollGrid(P),hitT=pHit(P,q),dimT=q&&!hitT,rw='';
+    for(var s1=0;s1<TR_SHELVES;s1++){rw+='<div class="mrow" style="grid-template-columns:repeat('+TR_PER+',1fr)">';for(var k1=0;k1<TR_PER;k1++){var id1=G1.g[s1][k1],x1=id1&&P.on[id1];rw+=!x1?'<i class="mx gap"></i>':(x1.ghost?'<i class="mx ghost"></i>':'<i class="mx'+(q&&match(x1.b,q)?' hl':'')+'" style="background:'+color(x1.b.art)[1]+'"></i>');}rw+='</div>';}
+    return '<button type="button" class="mp'+(P.n?'':' empty')+(hitT?' hit':'')+(dimT?' dim':'')+'" onclick="openPallet(\''+esc(P.p)+'\')" title="Троль '+esc(P.p)+'">'
+      +'<div class="mh"><span class="mn">'+esc(P.p)+'</span><span class="mc"'+(P.n>=TROLL_CAP?' style="background:#fde2df;color:#b42318"':'')+'>'+P.n+'/'+TROLL_CAP+'</span>'+(P.g?'<span class="mc" style="background:#e3edfb;color:#1f4a86" title="на фасовці">🔄'+P.g+'</span>':'')+'</div>'
+      +'<div class="ms" style="justify-content:flex-start">'+rw+'</div><div class="mv">'+esc(topVariety(P)||' ')+'</div></button>';}
   var hit=pHit(P,q),dim=q&&!hit,L=Math.ceil(P.slots.length/PER_LAYER),show=Math.min(L,5),rows='';
   for(var l=show-1;l>=0;l--){rows+='<div class="mrow">';for(var k=0;k<PER_LAYER;k++){var i=l*PER_LAYER+k;if(i>=P.slots.length){rows+='<i class="mx none"></i>';continue;}var id=P.slots[i];
     if(!id){rows+='<i class="mx gap"></i>';continue;}var x0=P.on[id],b=x0.b,c=color(b.art);rows+=x0.ghost?'<i class="mx ghost"></i>':'<i class="mx'+(q&&match(b,q)?' hl':'')+'" style="background:'+c[1]+'"></i>';}rows+='</div>';}
@@ -633,7 +638,11 @@ function render(){
   if(S.mode==='scan'){var keepLast=S.scanLast;G('app').innerHTML=head+scanPageHtml();S.scanLast=keepLast;renderScan();var is=G('q');if(is&&!G('scanPal')&&!S.side)is.focus({preventScroll:true});return;}
   if(S.mode==='cab'&&S.cabCells){G('app').innerHTML=head+'<div class="wrap">'+renderCabs(q)+'</div>';S.fresh={};if(act){var i0=G('q');if(i0){i0.focus();i0.setSelectionRange(i0.value.length,i0.value.length);}}return;}
   var h=head+'<div class="wrap">';
-  if(S.mode==='cab'){gs=gs.filter(function(g){return g.troll;});h+='<div class="found" style="margin:12px 0 0">🗄 Троль = проліт на '+TROLL_CAP+' ящ. Ящики ставимо по порядку: спершу заповнюємо Т1, потім Т2 і далі — у будь-яке вільне місце; у програмі місце пишеться <b class="mo">Т1</b>, <b class="mo">Т2</b>… Скануй наліпку «Т5» або впиши Т5 — відкриється троль.</div>';}
+  if(S.mode==='cab'){var tg=gs.filter(function(g){return g.troll;})[0],tl=tg?tg.list.filter(function(P){return !(S.hideEmpty&&!P.n)&&!(q&&!pHit(P,q))&&(!S.cat||P.slots.some(function(id){return id&&P.on[id]&&catOk(P.on[id].b);}));}):[],tn=tg?tg.list.reduce(function(t2,P){return t2+P.n;},0):0;
+    h+='<div class="found" style="margin:12px 0 0">🗄 Троль = проліт на '+TROLL_CAP+' ящ. (6 поличок по 3). Ставимо по порядку: спершу заповнюємо Т1, потім Т2 і далі — у будь-яке вільне місце; у програмі місце пишеться <b class="mo">Т1</b>, <b class="mo">Т2</b>… Скануй наліпку «Т5» або впиши Т5 — відкриється троль.</div>'
+      +'<section class="grp"><div class="gh"><h2>🗄 Тролі</h2><span class="st">'+(tg?tg.list.length:0)+' тролів · '+tn+' ящ. з '+((tg?tg.list.length:0)*TROLL_CAP)+'</span></div>'
+      +(tl.length?'<div class="bigcab"><div class="secs">'+tl.map(function(P){return trollCabHtml(P,q);}).join('')+'</div></div>':'<div class="emptyall">'+(q?'Нічого не знайдено':'Тролів нема')+'</div>')+'</section></div>';
+    G('app').innerHTML=h;if(S.open)drawPallet();S.fresh={};if(act){var iq=G('q');if(iq){iq.focus();iq.setSelectionRange(iq.value.length,iq.value.length);}}return;}
   if(!gs.length)h+='<div class="emptyall">'+(S.loading?'Завантажую палети…':'Поки нема палет')+'</div>';
   gs.forEach(function(g){
     var list=g.list.filter(function(P){return !(S.hideEmpty&&!P.n)&&!(q&&!pHit(P,q))&&(!S.cat||P.slots.some(function(id){return id&&P.on[id]&&catOk(P.on[id].b);}));});
@@ -719,6 +728,30 @@ function trollMerged(T,all){
   var slots=main?main.slots.slice():[],on={},n=0,g=0,old=0;
   ps.forEach(function(P){Object.keys(P.on).forEach(function(id){on[id]=P.on[id];});n+=P.n;g+=P.g||0;if(P!==main){if(P.kind==='cell')old+=P.n;P.slots.forEach(function(id){if(id&&slots.indexOf(id)<0)slots.push(id);});}});
   return {p:'Т'+T,kind:'troll',troll:T,sec:trollSecOf(T),slots:slots,on:on,n:n,g:g,old:old,cap:TROLL_CAP};
+}
+// розкласти ящики троля по 6 поличках × 3 місця — просто по порядку (де саме стоїть ящик у тролі — неважливо)
+var TR_SHELVES=6,TR_PER=3;
+function trollGrid(P){
+  var g=[],over=[],i,k;for(i=0;i<TR_SHELVES;i++){g.push([]);for(k=0;k<TR_PER;k++)g[i].push(null);}
+  var ids=P.slots.filter(function(id){return id&&P.on[id];}),real=ids.filter(function(id){return !P.on[id].ghost;}),gh=ids.filter(function(id){return P.on[id].ghost;}),rest=[];
+  rest=real;
+  var put=function(id,ghost){for(i=0;i<TR_SHELVES;i++)for(k=0;k<TR_PER;k++)if(!g[i][k]){g[i][k]=id;return true;}if(!ghost)over.push(id);return false;};
+  rest.forEach(function(id){put(id,false);});gh.forEach(function(id){put(id,true);});
+  return {g:g,over:over};
+}
+function trollCellHtml(P,id,q){
+  var vw=me().role==='viewer';
+  if(!id)return vw?'<div class="cs free"><span class="nm">вільно</span></div>':'<button type="button" class="cs free" onclick="openAdd(\''+esc(P.p)+'\')" title="Місце вільне — натисни, щоб покласти ящик"><span class="nm">вільно ＋</span></button>';
+  var x=P.on[id],b=x.b,c=color(b.art),hit=q&&match(b,q),dim=(q&&!hit)||!catOk(b),l=boxLeft(b),pcs=l==null?(b.qty||''):l,fl=S.flash[id]&&Date.now()-S.flash[id]<180000;
+  if(x.ghost)return '<button type="button" class="cs'+(hit?' hit':'')+(dim?' dim':'')+'" style="background:#f3f7fd;border:2px dashed #3a7bd5;border-left-width:2px;color:#1f4a86" onclick="boxInfo(\''+esc(id)+'\')" title="На фасовці з '+fmtT(b.ts)+'"><span class="nm">🔄 '+esc(b.name||b.art)+'</span><span class="ft"><span class="id">'+esc(b.boxId)+'</span><b>фасовка</b></span></button>';
+  return '<button type="button" class="cs full'+(hit?' hit':'')+(dim?' dim':'')+(fl?' back':'')+'" style="background:'+c[0]+';border-color:'+c[1]+'" onclick="boxInfo(\''+esc(id)+'\')" title="'+esc((b.name||b.art)+' · '+b.art+' · ящик '+b.boxId)+'">'+catTag(b)+'<span class="nm">'+esc(b.name||b.art)+'</span><span class="ft"><span class="id">'+esc(b.boxId)+'</span><b>'+esc(String(pcs))+'</b></span></button>';
+}
+// троль як раніше: 6 поличок по 3 ящики
+function trollCabHtml(P,q,inDrawer){
+  var G0=trollGrid(P),full=P.n>=TROLL_CAP,h='<div class="sec"'+(pHit(P,q)?' style="outline:3px solid var(--am);outline-offset:-3px"':'')+'><div class="sech" style="display:flex;align-items:center;gap:8px'+(inDrawer?'':';cursor:pointer')+'"'+(inDrawer?'':' onclick="openPallet(\''+esc(P.p)+'\')" title="Відкрити троль"')+'><span style="font-size:15px">'+esc(P.p)+'</span><span style="margin-left:auto;'+(full?'color:#b42318':'')+'">'+P.n+' / '+TROLL_CAP+'</span></div><div class="cabb">';
+  for(var s=0;s<TR_SHELVES;s++){h+='<div class="shelf"><span class="sn">'+(s+1)+'</span><div class="sc" style="grid-template-columns:repeat('+TR_PER+',1fr)">';for(var k=0;k<TR_PER;k++)h+=trollCellHtml(P,G0.g[s][k],q);h+='</div></div>';}
+  if(G0.over.length)h+='<div class="shelf"><span class="sn" title="понад '+TROLL_CAP+'">+</span><div class="sc" style="grid-template-columns:repeat('+TR_PER+',1fr)">'+G0.over.map(function(id){return trollCellHtml(P,id,q);}).join('')+'</div></div>';
+  return h+'</div></div>';
 }
 function trollRows(all){var N=trollTotal(),r={};for(var i=1;i<=N;i++)r[String(i)]=1;(all||[]).forEach(function(P){if(P.kind==='troll'||P.kind==='cell'){var T=trollOf(P.p);if(T)r[T]=1;}});return Object.keys(r).sort(function(a,b){return +a-+b;});}
 function nk2(a){return String(a||'').trim().replace(/^0+(?=\d)/,'');}
@@ -1262,7 +1295,7 @@ function palletField(p){
     h+='<div class="fm-row'+(has?' cur':'')+'"><div class="fm-rh">'+esc(g.title)+'</div><div class="fm-pals">'+g.list.map(function(P){var me2=P.p===p;return '<b class="'+(me2?'here':(P.n?'on':'off'))+'"'+(me2?' id="fmT"':'')+'>'+esc(P.p)+'</b>';}).join('')+'</div></div>';});
   return h+'</div>';
 }
-function placeLabel(to){var nt=normTroll(to);if(nt){var sc=trollSecOf(nt.slice(1));return '🗄 Троль '+nt.slice(1)+(sc?' (проліт '+sc+')':'')+' — у будь-яке вільне місце, пиши '+nt;}var s=slotOf(to);if(s)return 'Троль '+s.row+' · секція '+secOf(s)+' · поличка '+s.shelf+' · місце '+s.slot;if(!to)return '';return isCold(to)?'❄ Холодильник · палета '+to:'Палета запасу '+to;}
+function placeLabel(to){var nt=normTroll(to);if(nt){return '🗄 Троль '+nt.slice(1)+' — у будь-яке вільне місце, пиши '+nt;}var s=slotOf(to);if(s)return 'Троль '+s.row+' · секція '+secOf(s)+' · поличка '+s.shelf+' · місце '+s.slot;if(!to)return '';return isCold(to)?'❄ Холодильник · палета '+to:'Палета запасу '+to;}
 async function scanGo(val){
   var inp=G('q'),raw=val!=null?String(val):(inp?inp.value:''),ps=parseScan(raw),id=ps.id;if(!id)return;
   if(inp&&val==null){inp.value='';S.q='';}
@@ -1408,7 +1441,7 @@ function uGo(){
 function scanToPallet(){var L=S.scanLast;if(!L||!L.b)return;var np=nearestPallet(L.b),p=prompt('На яку палету поставити ящик '+L.b.boxId+'? (або троль: Т10)',np?np.p:'');if(!p)return;p=normPlace(p);if(!p)return;scanTo(p);}
 function scanTo(to){var L=S.scanLast;if(!L||!L.b||!to)return;L.w=Object.assign({},L.w,{to:normPlace(to),stay:false,needPallet:false,lay:null,alt:''});scanConfirm();}
 function scanAllOfArt(){var L=S.scanLast;if(!L||!L.b)return;var b=L.b;modal('<div style="font-size:20px;font-weight:800;margin-bottom:4px">'+catTag(b)+esc(b.name||b.art)+'</div><div class="mo" style="color:var(--mu)">арт. '+esc(b.art)+'</div>'+artPlaces(b.art,L.w&&L.w.to&&slotOf(L.w.to)?L.w.to:'')+'<div class="row"><button class="btn" onclick="renderScan()">← Назад</button><button class="btn" onclick="S.scanLast=null;closeModal()">Закрити</button></div>','wide');}
-function scanShowCab(){var L=S.scanLast;if(!L||!L.b)return;var a=L.b.art;S.scanLast=null;closeModal();S.q=a;setMode('cab');setTimeout(function(){var t=document.querySelector('.cs.hit,.mp.hit');if(t)t.scrollIntoView({block:'center',behavior:'smooth'});},250);}
+function scanShowCab(){var L=S.scanLast;if(!L||!L.b)return;var a=L.b.art;S.scanLast=null;closeModal();S.q=a;setMode('cab');setTimeout(function(){var t=document.querySelector('.cs.hit,.mp.hit,.sec .cs.hit');if(t)t.scrollIntoView({block:'center',behavior:'smooth'});},250);}
 function scanPageHtml(){return '<div class="wrap" style="max-width:1200px"><div style="text-align:right;font-size:11px;color:var(--mu);margin-top:6px">версія '+esc(APP_BUILD)+'</div><div id="scanRes" style="margin-top:8px"></div></div>';}
 // у режимі скану фокус завжди на полі (сканер «друкує» туди)
 document.addEventListener('keydown',function(e){if(!sess()||document.querySelector('.modal')||S.side||G('lgScr'))return;var a=document.activeElement;if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT'))return;var i=G('q');if(i&&e.key&&e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey){i.focus();}});
@@ -1580,10 +1613,10 @@ function drawPallet(){
   var P=palletByName(S.open),q=String(S.q||'').trim().toLowerCase(),u=me(),o=G('ov');
   if(!o){o=document.createElement('div');o.id='ov';o.className='ov';o.onclick=function(e){if(e.target===o)closePallet();};document.body.appendChild(o);}
   var L=Math.ceil(P.slots.length/PER_LAYER),gaps=P.slots.filter(function(x){return !x;}).length;
-  o.innerHTML='<div class="dr"><div class="dh"><span class="pn">'+(P.kind==='pal'?'Палета ':(P.kind==='troll'?'🗄 Троль ':''))+esc(P.p)+(P.kind==='troll'?' <small style="font-size:13px;color:var(--mu)">'+P.n+' з '+TROLL_CAP+(P.sec?' · проліт '+esc(P.sec):'')+'</small>':'')+'</span><span class="meta">'+P.n+' ящ. · '+L+' шар.'+(gaps?' · <span style="color:#b26b00">'+gaps+' вільн.</span>':'')+'</span>'
+  o.innerHTML='<div class="dr"><div class="dh"><span class="pn">'+(P.kind==='pal'?'Палета ':(P.kind==='troll'?'🗄 Троль ':''))+esc(P.p)+(P.kind==='troll'?' <small style="font-size:13px;color:var(--mu)">'+P.n+' з '+TROLL_CAP+'</small>':'')+'</span><span class="meta">'+(P.kind==='troll'?'':P.n+' ящ. · '+L+' шар.')+(gaps?' · <span style="color:#b26b00">'+gaps+' вільн.</span>':'')+'</span>'
     +(u.role!=='viewer'?'<button class="btn pr noprint" onclick="openAdd(\''+esc(P.p)+'\')">＋ Ящик</button>':'')
     +'<button class="btn noprint" onclick="window.print()" title="Друк схеми">🖨</button><button class="btn noprint" onclick="closePallet()">✕</button></div>'
-    +'<div class="db">'+(P.kind==='troll'?'<div class="found" style="margin:0 0 10px">🗄 Троль = проліт на '+TROLL_CAP+' ящ. (6 поличок по 3): став ящик у будь-яке вільне місце, у програмі місце — <b class="mo">'+esc(P.p)+'</b>. Вільно: <b>'+Math.max(0,TROLL_CAP-P.n)+'</b>.'+(P.old?' <span style="color:var(--mu)">'+P.old+' ящ. ще записані старими адресами ячейок цього прольоту — вони теж тут.</span>':'')+'</div>':'')+palletHtml(P,q)+legend(P)+boxTable(P)+'</div></div>';
+    +'<div class="db">'+(P.kind==='troll'?'<div class="found" style="margin:0 0 10px">🗄 Троль = проліт на '+TROLL_CAP+' ящ. (6 поличок по 3): став ящик у будь-яке вільне місце, у програмі місце — <b class="mo">'+esc(P.p)+'</b>. Вільно: <b>'+Math.max(0,TROLL_CAP-P.n)+'</b>.'+'</div>':'')+(P.kind==='troll'?'<div class="bigcab"><div class="secs" style="grid-template-columns:1fr">'+trollCabHtml(P,q,true)+'</div></div><div style="font-size:12px;color:var(--mu);margin:6px 2px 0">Місця на поличках показані умовно — ящик може стояти в будь-якому вільному місці троля.</div>':palletHtml(P,q))+legend(P)+boxTable(P)+'</div></div>';
 }
 function findBox(id){var all=build();for(var i=0;i<all.length;i++)if(all[i].on[id])return {P:all[i],x:all[i].on[id]};return null;}
 function closeModal(){var m=document.querySelector('.modal');if(m)m.remove();}
